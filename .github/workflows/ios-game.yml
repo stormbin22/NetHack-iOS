@@ -24,7 +24,7 @@ jobs:
         if: always()
         with:
           name: iOS-screen-verification
-          path: build/ios/ios-game-screen.png
+          path: build/ios/ios-*-screen.png
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
