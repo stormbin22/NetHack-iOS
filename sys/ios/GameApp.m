@@ -89,6 +89,8 @@ static UIColor *NHColor(int rgb) {
 @property NSMutableArray<NSArray *> *input;
 @property int nextWindow;
 @property BOOL started, ended, positionInput, numpad;
+@property BOOL saveRequested, mouseLocked, expectsDirection, panned;
+@property CGPoint player;
 @property UIBackgroundTaskIdentifier backgroundTask;
 - (void)enqueue:(NSArray *)event;
 - (id)invoke:(NSString *)name arguments:(NSArray *)args;
@@ -117,6 +119,7 @@ static NHGame *game;
     self.keyboard=[UITextField new]; self.keyboard.delegate=self; self.keyboard.autocorrectionType=UITextAutocorrectionTypeNo; self.keyboard.autocapitalizationType=UITextAutocapitalizationTypeNone; self.keyboard.keyboardType=UIKeyboardTypeASCIICapable; self.keyboard.placeholder=@"명령 키 입력"; self.keyboard.textColor=UIColor.whiteColor; [self.keyboard.heightAnchor constraintEqualToConstant:28].active=YES; [stack addArrangedSubview:self.keyboard];
 }
 - (UIView *)viewForZoomingInScrollView:(UIScrollView *)scroll { return self.map; }
+- (void)scrollViewWillBeginDragging:(UIScrollView *)scroll { self.panned=YES; }
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated]; if(self.started)return; self.started=YES;
     NSURL *docs=[NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
@@ -147,7 +150,25 @@ static NHGame *game;
 - (void)mapHold:(UILongPressGestureRecognizer *)hold { if(hold.state==UIGestureRecognizerStateBegan)[self touch:[hold locationInView:self.map] longPress:YES]; }
 - (void)touch:(CGPoint)p longPress:(BOOL)hold {
     int x=(int)(p.x/24),y=(int)(p.y/24); if(x<1||x>=80||y<0||y>=21)return;
-    [self enqueue:@[@0,@(x),@(y)]];
+    CGFloat dx=p.x-(self.player.x+0.5)*24,dy=p.y-(self.player.y+0.5)*24;
+    CGFloat z=self.scroll.zoomScale;
+    BOOL onSelf=(x==(int)self.player.x && y==(int)self.player.y) || (dx*dx+dy*dy)*z*z<25*25;
+    BOOL travel=self.panned && (abs(x-(int)self.player.x)>3 || abs(y-(int)self.player.y)>3);
+    if(self.mouseLocked || (!self.expectsDirection && (onSelf||travel))) {
+        if(onSelf && !self.mouseLocked) { x=self.player.x; y=self.player.y; }
+        [self enqueue:@[@0,@(x),@(y)]];
+    } else {
+        int c='.';
+        if(!onSelf) {
+            if(fabs(dy)<(sqrt(2)-1)*fabs(dx))c=dx>0?'l':'h';
+            else if(fabs(dx)<(sqrt(2)-1)*fabs(dy))c=dy<0?'k':'j';
+            else c=dx>0?(dy<0?'u':'n'):(dy<0?'y':'b');
+        }
+        if(self.numpad) { const char *v="hjklyubn",*n="42867913"; const char *at=strchr(v,c); if(at)c=n[at-v]; }
+        if(hold && !self.expectsDirection)[self enqueue:@[@'g']];
+        [self enqueue:@[@(c)]];
+    }
+    self.panned=NO;
 }
 - (id)prompt:(NSString *)title initial:(NSString *)initial {
     dispatch_semaphore_t ready=dispatch_semaphore_create(0); __block NSString *answer=nil;
@@ -173,10 +194,12 @@ static NHGame *game;
 - (id)invoke:(NSString *)name arguments:(NSArray *)a {
     if([name isEqual:@"receiveKeyCmd"] || [name isEqual:@"receivePosKeyCmd"]) {
         BOOL pos=[name isEqual:@"receivePosKeyCmd"];
+        dispatch_sync(dispatch_get_main_queue(),^{ self.mouseLocked=pos && [a[0] boolValue]; });
         [self.inputCondition lock];
         NSArray *event=nil;
         do { while(!self.input.count)[self.inputCondition wait]; event=self.input.firstObject; [self.input removeObjectAtIndex:0]; } while(!pos && [event[0] intValue]==0);
         [self.inputCondition unlock];
+        dispatch_sync(dispatch_get_main_queue(),^{ self.expectsDirection=NO; if([event[0] intValue]==128)self.saveRequested=YES; });
         if([event[0] intValue]==0) { NHBuffer *b=a[1]; jint *p=b.data.mutableBytes; p[0]=[event[1] intValue]; p[1]=[event[2] intValue]; }
         return event[0];
     }
@@ -191,7 +214,7 @@ static NHGame *game;
     if([name isEqual:@"getDumplogDir"])return @".";
     if([name isEqual:@"displayWindow"]) {
         __block BOOL text=NO;
-        dispatch_sync(dispatch_get_main_queue(),^{ int t=[self.windows[a[0]][@"type"] intValue]; text=t==4||t==5; });
+        dispatch_sync(dispatch_get_main_queue(),^{ int t=[self.windows[a[0]][@"type"] intValue]; text=t==4||t==5; if(t==1 && self.saveRequested && [a[1] boolValue])[self enqueue:@[@32]]; });
         if(text) { id result=[self menu:a[0] how:0]; [self enqueue:@[@32]]; return result; }
     }
     if([name isEqual:@"delayOutput"]) { [NSThread sleepForTimeInterval:0.03]; return nil; }
@@ -212,11 +235,13 @@ static NHGame *game;
         }
         else if([name isEqual:@"printTile"]) { int x=[a[1] intValue],y=[a[2] intValue]; self.map.cells[@(y*80+x)]=@[a[3],a[4],a[5],a[6]]; [self.map setNeedsDisplay]; }
         else if([name isEqual:@"setCursorPos"]) { if([self.windows[a[0]][@"type"] intValue]==3) { self.map.cursor=CGPointMake([a[1] intValue],[a[2] intValue]); [self.map setNeedsDisplay]; } }
-        else if([name isEqual:@"cliparound"]) { CGFloat z=self.scroll.zoomScale; CGPoint p=CGPointMake([a[0] floatValue]*24*z-self.scroll.bounds.size.width/2,[a[1] floatValue]*24*z-self.scroll.bounds.size.height/2); p.x=MAX(0,MIN(p.x,self.scroll.contentSize.width-self.scroll.bounds.size.width)); p.y=MAX(0,MIN(p.y,self.scroll.contentSize.height-self.scroll.bounds.size.height)); [self.scroll setContentOffset:p animated:NO]; }
+        else if([name isEqual:@"cliparound"]) { self.player=CGPointMake([a[2] floatValue],[a[3] floatValue]); CGFloat z=self.scroll.zoomScale; CGPoint p=CGPointMake([a[0] floatValue]*24*z-self.scroll.bounds.size.width/2,[a[1] floatValue]*24*z-self.scroll.bounds.size.height/2); p.x=MAX(0,MIN(p.x,self.scroll.contentSize.width-self.scroll.bounds.size.width)); p.y=MAX(0,MIN(p.y,self.scroll.contentSize.height-self.scroll.bounds.size.height)); [self.scroll setContentOffset:p animated:NO]; }
         else if([name isEqual:@"addMenu"]) [self.windows[a[0]][@"items"] addObject:@{@"id":a[2],@"text":NHText(a[6]),@"selected":a[7]}];
         else if([name isEqual:@"endMenu"]) self.windows[a[0]][@"title"]=NHText(a[1]);
         else if([name isEqual:@"ynFunction"]) { self.messages.text=[self.messages.text stringByAppendingFormat:@"\n%@ [%@]",NHText(a[0]),NHText(a[1])]; [self.messages scrollRangeToVisible:NSMakeRange(self.messages.text.length,0)]; }
         else if([name isEqual:@"setNumPadOption"]) self.numpad=[a[0] boolValue];
+        else if([name isEqual:@"askDirection"]) self.expectsDirection=YES;
+        else if([name isEqual:@"copyText"]) UIPasteboard.generalPasteboard.string=NHText(a[0]);
         else if([name isEqual:@"debugLog"]) NSLog(@"NetHack: %@",NHText(a[0]));
     }); return result;
 }

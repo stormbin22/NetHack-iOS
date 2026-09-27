@@ -16,6 +16,7 @@ NSString *NHText(id value) {
     }
     return @"";
 }
+void NHCopyText(const char *text) { NHInvoke(@"copyText", @[@(text ?: "")]); }
 struct NHMethod { const char *name; const char *signature; };
 static id obj(jobject p) { return (__bridge id)p; }
 static jobject keep(id o) { return o ? (void *)CFBridgingRetain(o) : NULL; }

@@ -66,6 +66,7 @@ run("./tilemap", cwd=ROOT/"util")
 
 sources=re.search(r"HACKCSRC \?= (.*?)(?:\n\n)", (ROOT/"sys/android/Makefile.src").read_text(), re.S)[1]
 sources=["src/"+s for s in sources.replace("\\\n", " ").split()]
+sources += ["src/cfgfiles.c", "sys/ios/platform.c"]
 sources += ["src/date.c", "src/tile.c", "sys/share/posixregex.c", "sys/share/ioctl.c", "sys/share/unixtty.c", "sys/android/androidmain.c", "sys/android/androidunix.c", "sys/android/winandroid.c"]
 sources += [str(p) for p in lua.glob("*.c") if p.name not in ("lua.c", "luac.c")]
 # iOS has no command shell. Lua os.execute must report that it is unavailable.
@@ -123,7 +124,7 @@ run("xcrun", "clang", *smoke, "-framework", "Foundation", "-o", runner)
 play=OUT/"smoke-playground"
 shutil.copytree(data,play,dirs_exist_ok=True)
 (play/"save").mkdir(exist_ok=True)
-(play/"defaults.nh").write_text("OPTIONS=name:PortTest,role:Valkyrie,race:human,gender:female,align:lawful\nOPTIONS=!autopickup,!legacy\n")
+(play/"defaults.nh").write_text("OPTIONS=name:PortTest,role:Valkyrie,race:human,gender:female,align:lawful\nOPTIONS=!autopickup,!legacy,force_invmenu\n")
 for phase in ([], ["restore"]):
     check=subprocess.run([str(runner),str(play),*phase],capture_output=True,text=True,timeout=60)
     print(check.stdout,flush=True)
