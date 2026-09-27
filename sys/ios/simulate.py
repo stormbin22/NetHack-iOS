@@ -45,9 +45,12 @@ print("UI test device:",device["name"],flush=True)
 if device["state"]!="Booted":run("xcrun","simctl","boot",udid)
 run("xcrun","simctl","bootstatus",udid,"-b")
 run("xcrun","simctl","install",udid,app)
-run("xcrun","simctl","launch",udid,"org.nethack.personal.ios","--ui-smoke")
 container=Path(run("xcrun","simctl","get_app_container",udid,"org.nethack.personal.ios","data"))
-for marker,filename in (("UI_READY","ios-game-screen.png"),("UI_KEYBOARD","ios-keyboard-screen.png"),("UI_SETTINGS","ios-settings-screen.png")):
+screens=(("UI_READY","ios-game-screen.png"),("UI_KEYBOARD","ios-keyboard-screen.png"),("UI_SETTINGS","ios-settings-screen.png"),("UI_PROMPT","ios-prompt-screen.png"),("UI_PROMPT_CANCEL","ios-prompt-cancel-screen.png"),("UI_QUESTION","ios-question-screen.png"),("UI_DIALOG","ios-dialog-screen.png"),("UI_MODAL_RESTORED","ios-modal-restored-screen.png"))
+for marker,_ in screens:
+    (container/"Documents"/marker).unlink(missing_ok=True)
+run("xcrun","simctl","launch",udid,"org.nethack.personal.ios","--ui-smoke")
+for marker,filename in screens:
     ready=container/"Documents"/marker
     for _ in range(45):
         if ready.exists():break
@@ -56,4 +59,4 @@ for marker,filename in (("UI_READY","ios-game-screen.png"),("UI_KEYBOARD","ios-k
     run("xcrun","simctl","io",udid,"screenshot",out/filename)
     if not ready.exists():raise RuntimeError(f"UIKit check did not finish: {marker}")
     print(f"PASS: {marker}",flush=True)
-print("PASS: Gurr command input, map, HP status, keyboard and settings",flush=True)
+print("PASS: map, Gurr keyboard, prompt input/cancel, question keys, dialog, settings and control restoration",flush=True)

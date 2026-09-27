@@ -139,16 +139,17 @@
     for(NSNumber *c in NHCommandKeys(cmd))[self enqueue:@[c]];
 }
 - (void)showMenu {
-    if(self.presentedViewController)return;
-    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"NetHack" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    [menu addAction:[UIAlertAction actionWithTitle:@"Settings" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ [self afterDismiss:menu perform:^{[self showSettings];}]; }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"Message history" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ [self afterDismiss:menu perform:^{[self showHistory];}]; }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"Save and exit" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self enqueue:@[@128]];}]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    menu.popoverPresentationController.sourceView=self.status; menu.popoverPresentationController.sourceRect=self.status.bounds; [self presentViewController:menu animated:YES completion:nil];
-}
-- (void)afterDismiss:(UIViewController *)controller perform:(void (^)(void))action {
-    [controller dismissViewControllerAnimated:YES completion:action];
+    if(self.presentedViewController || self.modalControlsHidden)return;
+    NHGurrOverlay *menu=[[NHGurrOverlay alloc] initWithTitle:@"NetHack"];
+    __weak NHGurrOverlay *weakMenu=menu; __weak NHGame *weakSelf=self;
+    [menu addOptionList:@[@"Settings",@"Message history",@"Save and exit"] select:^(NSUInteger index){
+        [weakMenu dismiss];
+        if(index==0) [weakSelf showSettings];
+        else if(index==1) [weakSelf showHistory];
+        else if(index==2) [weakSelf enqueue:@[@128]];
+    }];
+    [menu addActionWithTitle:@"Cancel" primary:NO handler:^{ [weakMenu dismiss]; }];
+    [menu presentInView:self.view focusInput:NO];
 }
 - (NSArray *)settingsRows {
     NSArray *locations=@[@"Left",@"Right",@"Top",@"Bottom"]; NSMutableArray *panels=[NSMutableArray new];
@@ -185,6 +186,40 @@
     NHMenu *m=[NHMenu new]; m.title=@"Message history"; NSMutableArray *items=[NSMutableArray new];
     for(NSString *s in self.history)[items addObject:@{@"id":@0,@"text":s}]; m.items=items; m.how=0;
     UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:m]; nav.overrideUserInterfaceStyle=UIUserInterfaceStyleDark; [self presentViewController:nav animated:YES completion:nil];
+}
+- (void)runModalUISmokeSequence {
+    BOOL keyboardWasHidden=self.keyboardPanel.hidden, dpadWasHidden=self.dpad.hidden, moreWasHidden=self.moreButton.hidden;
+    NSArray<NSNumber *> *panelStates=[self.panels valueForKey:@"hidden"];
+    __weak NHGame *weakSelf=self;
+    NHGurrOverlay *prompt=[self showLinePrompt:@"Name this creature" initial:@"shopkeeper" history:@[@"shopkeeper",@"watchman"] maxLength:40 focusInput:YES completion:^(NSString *value,BOOL cancelled){
+        NSCAssert(!cancelled && [value isEqual:@"Goblin"],@"Prompt input was not returned");
+        NHGurrOverlay *cancelPrompt=[weakSelf showLinePrompt:@"Prompt cancellation" initial:@"keep me" history:@[@"keep me"] maxLength:40 focusInput:NO completion:^(NSString *cancelValue,BOOL wasCancelled){
+            NSCAssert(wasCancelled && [cancelValue isEqual:@"\033"],@"Prompt cancellation did not return Escape");
+            [weakSelf writeUIReady:@"UI_PROMPT_CANCEL"];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1.5*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+            NHGurrOverlay *question=[weakSelf showQuestion:@"Really leave this test?" choices:@"yn" defaultKey:'y' completion:^(int key){
+                NSCAssert(key=='n',@"Question did not return the selected response key");
+                NHGurrOverlay *dialog=[weakSelf beginGameOverlay:@"Message history"];
+                [dialog addTextView:@"A Gurr-style information dialog keeps the game visible behind a dim overlay and scrolls long text inside its card." height:150];
+                __weak NHGurrOverlay *weakDialog=dialog;
+                [dialog addActionWithTitle:@"OK" primary:YES handler:^{
+                    [weakDialog dismiss];
+                    NSCAssert(weakSelf.keyboardPanel.hidden==keyboardWasHidden && weakSelf.dpad.hidden==dpadWasHidden && weakSelf.moreButton.hidden==moreWasHidden,@"Game controls were not restored after the dialog");
+                    for(NSUInteger i=0;i<MIN(weakSelf.panels.count,panelStates.count);i++) NSCAssert(weakSelf.panels[i].hidden==[panelStates[i] boolValue],@"Command panel visibility changed after a dialog");
+                    [weakSelf writeUIReady:@"UI_MODAL_RESTORED"];
+                }];
+                [dialog presentInView:weakSelf.view focusInput:NO];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [weakSelf writeUIReady:@"UI_DIALOG"]; });
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [(UIButton *)[dialog viewWithTag:1000] sendActionsForControlEvents:UIControlEventTouchUpInside]; });
+            }];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [weakSelf writeUIReady:@"UI_QUESTION"]; });
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [(UIButton *)[question viewWithTag:2001] sendActionsForControlEvents:UIControlEventTouchUpInside]; });
+            });
+        }];
+        if(cancelPrompt.onInputEscape)cancelPrompt.onInputEscape();
+    }];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [weakSelf writeUIReady:@"UI_PROMPT"]; });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ prompt.inputField.text=@"Goblin"; if(prompt.onInputReturn)prompt.onInputReturn(); });
 }
 - (void)updateStatus:(NSMutableDictionary *)window {
     NSArray *lines=window[@"statusLines"]; if(!lines)return;

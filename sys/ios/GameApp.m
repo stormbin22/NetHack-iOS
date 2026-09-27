@@ -62,14 +62,22 @@ static UIColor *NHColor(int rgb) {
     if(press.state!=UIGestureRecognizerStateBegan || !self.how)return;
     NSIndexPath *path=[self.tableView indexPathForRowAtPoint:[press locationInView:self.tableView]]; if(!path)return;
     NSDictionary *item=self.items[path.row]; NSNumber *ident=item[@"id"]; if(!ident.longLongValue)return;
-    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"Quantity" message:item[@"text"] preferredStyle:UIAlertControllerStyleAlert];
-    [a addTextFieldWithConfigurationHandler:^(UITextField *f){ f.keyboardType=UIKeyboardTypeNumberPad; f.placeholder=@"All"; }];
-    [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Select" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-        long long count=a.textFields.firstObject.text.longLongValue; if(self.how==1)[self.selection removeAllObjects]; self.selection[ident]=count>0?@(count):@(-1);
-        [a dismissViewControllerAnimated:YES completion:^{ if(self.how==1)[self done]; else [self.tableView reloadData]; }];
-    }]];
-    [self presentViewController:a animated:YES completion:nil];
+    NHGurrOverlay *dialog=[[NHGurrOverlay alloc] initWithTitle:@"Quantity"];
+    [dialog addMessage:item[@"text"] ?: @""];
+    UITextField *field=[dialog addInputWithInitialText:@"" keyboardType:UIKeyboardTypeNumberPad maxLength:12];
+    field.placeholder=@"All"; __weak NHGurrOverlay *weakDialog=dialog; __weak NHMenu *weakSelf=self;
+    __weak UITextField *weakField=field;
+    void (^select)(void)=^{
+        long long count=weakField.text.longLongValue; if(weakSelf.how==1)[weakSelf.selection removeAllObjects];
+        weakSelf.selection[ident]=count>0?@(count):@(-1); [weakDialog dismiss];
+        if(weakSelf.how==1)[weakSelf done]; else [weakSelf.tableView reloadData];
+    };
+    dialog.onInputReturn=select;
+    dialog.onInputEscape=^{ [weakDialog dismiss]; };
+    ((NHGurrInputField *)field).onEscape=^{ [weakDialog dismiss]; };
+    [dialog addActionWithTitle:@"Cancel" primary:NO handler:^{ [weakDialog dismiss]; }];
+    [dialog addActionWithTitle:@"Select" primary:YES handler:select];
+    [dialog presentInView:self.view focusInput:YES];
 }
 - (void)done {
     NHBuffer *b=[NHBuffer count:self.selection.count*2 size:sizeof(jlong)]; jlong *p=b.data.mutableBytes;
@@ -117,9 +125,16 @@ static UIColor *NHColor(int rgb) {
 @property NSString *keyboardMode;
 @property BOOL shift, lastLandscape, waitingKey;
 @property NSInteger uiSmokeTurns;
+@property BOOL modalControlsHidden, modalKeyboardPanelWasHidden, modalDpadWasHidden, modalMoreButtonWasHidden;
+@property NSMutableArray<NSNumber *> *modalPanelHiddenStates;
 
 - (void)enqueue:(NSArray *)event;
 - (id)invoke:(NSString *)name arguments:(NSArray *)args;
+- (NHGurrOverlay *)beginGameOverlay:(NSString *)title;
+- (void)restoreGameControls;
+- (NHGurrOverlay *)showLinePrompt:(NSString *)title initial:(NSString *)initial history:(NSArray<NSString *> *)history maxLength:(NSUInteger)maxLength focusInput:(BOOL)focusInput completion:(void (^)(NSString *,BOOL))completion;
+- (NHGurrOverlay *)showQuestion:(NSString *)question choices:(NSString *)choices defaultKey:(int)defaultKey completion:(void (^)(int))completion;
+- (void)runModalUISmokeSequence;
 @end
 static NHGame *game;
 @implementation NHGame
@@ -176,16 +191,150 @@ static NHGame *game;
     }
     self.panned=NO;
 }
-- (id)prompt:(NSString *)title initial:(NSString *)initial {
+- (NHGurrOverlay *)beginGameOverlay:(NSString *)title {
+    [self.keyboard resignFirstResponder];
+    if (!self.modalControlsHidden) {
+        self.modalControlsHidden=YES; self.modalKeyboardPanelWasHidden=self.keyboardPanel.hidden;
+        self.modalDpadWasHidden=self.dpad.hidden; self.modalMoreButtonWasHidden=self.moreButton.hidden;
+        self.modalPanelHiddenStates=[NSMutableArray new];
+        for (UIView *panel in self.panels) [self.modalPanelHiddenStates addObject:@(panel.hidden)];
+        self.keyboardPanel.hidden=YES; self.dpad.hidden=YES; self.moreButton.hidden=YES;
+        for (UIView *panel in self.panels) panel.hidden=YES;
+    }
+    NHGurrOverlay *overlay=[[NHGurrOverlay alloc] initWithTitle:title ?: @"NetHack"];
+    __weak NHGame *weakSelf=self;
+    overlay.onDismiss=^{ [weakSelf restoreGameControls]; };
+    return overlay;
+}
+- (void)restoreGameControls {
+    if (!self.modalControlsHidden) return;
+    self.modalControlsHidden=NO; self.keyboardPanel.hidden=self.modalKeyboardPanelWasHidden;
+    self.dpad.hidden=self.modalDpadWasHidden; self.moreButton.hidden=self.modalMoreButtonWasHidden;
+    for (NSUInteger i=0;i<MIN(self.panels.count,self.modalPanelHiddenStates.count);i++) self.panels[i].hidden=[self.modalPanelHiddenStates[i] boolValue];
+    self.modalPanelHiddenStates=nil; [self.view setNeedsLayout]; [self.view layoutIfNeeded];
+}
+- (NHGurrOverlay *)showLinePrompt:(NSString *)title initial:(NSString *)initial history:(NSArray<NSString *> *)history maxLength:(NSUInteger)maxLength focusInput:(BOOL)focusInput completion:(void (^)(NSString *,BOOL))completion {
+    NHGurrOverlay *overlay=[[NHGurrOverlay alloc] initWithTitle:title ?: @"NetHack"];
+    UITextField *field=[overlay addInputWithInitialText:initial keyboardType:UIKeyboardTypeASCIICapable maxLength:maxLength ?: 200];
+    [overlay addHistoryItems:history select:nil];
+    __weak NHGurrOverlay *weakOverlay=overlay; __weak UITextField *weakField=field;
+    void (^finish)(BOOL)=^(BOOL cancelled){
+        NSString *value=cancelled?@"\033":(weakField.text ?: @"");
+        [weakOverlay dismiss]; if(completion)completion(value,cancelled);
+    };
+    overlay.onInputReturn=^{ finish(NO); }; overlay.onInputEscape=^{ finish(YES); };
+    ((NHGurrInputField *)field).onEscape=^{ finish(YES); };
+    [overlay addActionWithTitle:@"Cancel" primary:NO handler:^{ finish(YES); }];
+    [overlay addActionWithTitle:@"OK" primary:YES handler:^{ finish(NO); }];
+    __weak NHGame *weakSelf=self; overlay.onDismiss=^{ [weakSelf restoreGameControls]; };
+    [self.keyboard resignFirstResponder];
+    if (!self.modalControlsHidden) {
+        self.modalControlsHidden=YES; self.modalKeyboardPanelWasHidden=self.keyboardPanel.hidden;
+        self.modalDpadWasHidden=self.dpad.hidden; self.modalMoreButtonWasHidden=self.moreButton.hidden;
+        self.modalPanelHiddenStates=[NSMutableArray new];
+        for (UIView *panel in self.panels) [self.modalPanelHiddenStates addObject:@(panel.hidden)];
+        self.keyboardPanel.hidden=YES; self.dpad.hidden=YES; self.moreButton.hidden=YES;
+        for (UIView *panel in self.panels) panel.hidden=YES;
+    }
+    [overlay presentInView:self.view focusInput:focusInput]; return overlay;
+}
+- (NSArray<NSString *> *)promptHistoryForKey:(NSString *)key {
+    NSArray *values=[NSUserDefaults.standardUserDefaults arrayForKey:key];
+    NSMutableArray *items=[NSMutableArray new];
+    for (id value in values) if ([value isKindOfClass:NSString.class] && [value length] && ![items containsObject:value]) [items addObject:value];
+    return [items subarrayWithRange:NSMakeRange(0,MIN(items.count,10))];
+}
+- (void)rememberPromptValue:(NSString *)value forKey:(NSString *)key {
+    if (!value.length || ![value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].length) return;
+    NSMutableArray *items=[[self promptHistoryForKey:key] mutableCopy]; [items removeObject:value]; [items insertObject:value atIndex:0];
+    if (items.count>10) [items removeObjectsInRange:NSMakeRange(10,items.count-10)];
+    [NSUserDefaults.standardUserDefaults setObject:items forKey:key];
+}
+- (NSString *)initialTextForPrompt:(NSString *)title supplied:(NSString *)supplied history:(NSArray<NSString *> *)history {
+    if ([title containsString:@"For what do you wish"]) return @"";
+    NSArray *patterns=@[@"Replace annotation \x22",@"Replace previous annotation \x22",@" called ",@" named "];
+    for (NSUInteger i=0;i<patterns.count;i++) {
+        NSString *pattern=patterns[i];
+        if (i<2 && [title hasPrefix:pattern]) {
+            NSUInteger start=i==0?20:29; NSRange end=[title rangeOfString:@"\x22" options:NSBackwardsSearch];
+            if (end.location!=NSNotFound && end.location>start) return [title substringWithRange:NSMakeRange(start,end.location-start)];
+        } else if (i==2 && ([title hasPrefix:@"What do you want to call"] || [title hasPrefix:@"Call "])) {
+            NSRange marker=[title rangeOfString:pattern]; if(marker.location!=NSNotFound && title.length>marker.location+pattern.length) return [title substringWithRange:NSMakeRange(marker.location+pattern.length,title.length-marker.location-pattern.length-1)];
+        } else if (i==3 && [title hasPrefix:@"What do you want to name"]) {
+            NSRange marker=[title rangeOfString:pattern]; if(marker.location!=NSNotFound && title.length>marker.location+pattern.length) return [title substringWithRange:NSMakeRange(marker.location+pattern.length,title.length-marker.location-pattern.length-1)];
+        }
+    }
+    if (supplied.length) return supplied;
+    return history.firstObject ?: @"";
+}
+- (NSString *)prompt:(NSString *)title initial:(NSString *)initial historyKey:(NSString *)historyKey maxLength:(NSUInteger)maxLength focusInput:(BOOL)focusInput {
     dispatch_semaphore_t ready=dispatch_semaphore_create(0); __block NSString *answer=nil;
+    NSArray *history=[self promptHistoryForKey:historyKey];
+    NSString *prefill=[self initialTextForPrompt:title supplied:initial history:history];
     dispatch_async(dispatch_get_main_queue(),^{
-        [self.keyboard resignFirstResponder];
-        UIAlertController *alert=[UIAlertController alertControllerWithTitle:title message:nil preferredStyle:UIAlertControllerStyleAlert];
-        [alert addTextFieldWithConfigurationHandler:^(UITextField *f){ f.text=initial; f.autocapitalizationType=UITextAutocapitalizationTypeNone; f.autocorrectionType=UITextAutocorrectionTypeNo; f.keyboardType=UIKeyboardTypeASCIICapable; }];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a){ answer=@"\033"; [alert dismissViewControllerAnimated:YES completion:^{dispatch_semaphore_signal(ready);}]; }]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ answer=alert.textFields.firstObject.text ?: @""; [alert dismissViewControllerAnimated:YES completion:^{dispatch_semaphore_signal(ready);}]; }]];
-        [self presentViewController:alert animated:YES completion:nil];
-    }); dispatch_semaphore_wait(ready,DISPATCH_TIME_FOREVER); return answer;
+        [self showLinePrompt:title initial:prefill history:history maxLength:maxLength focusInput:focusInput completion:^(NSString *value,BOOL cancelled){
+            answer=value;
+            if(!cancelled) [self rememberPromptValue:value forKey:historyKey];
+            dispatch_semaphore_signal(ready);
+        }];
+    });
+    dispatch_semaphore_wait(ready,DISPATCH_TIME_FOREVER); return answer;
+}
+- (NHGurrOverlay *)showQuestion:(NSString *)question choices:(NSString *)choices defaultKey:(int)defaultKey completion:(void (^)(int))completion {
+    NHGurrOverlay *overlay=[self beginGameOverlay:question ?: @"NetHack"];
+    NSMutableArray<NSString *> *options=[NSMutableArray new];
+    for (NSUInteger i=0;i<choices.length;i++) { unichar key=[choices characterAtIndex:i]; if(key) [options addObject:[NSString stringWithCharacters:&key length:1]]; }
+    if (!options.count) { unichar fallback=(unichar)(defaultKey ?: 27); [options addObject:[NSString stringWithCharacters:&fallback length:1]]; }
+    NSUInteger defaultIndex=0;
+    for (NSUInteger i=0;i<options.count;i++) if([options[i] characterAtIndex:0]==(unichar)defaultKey) { defaultIndex=i; break; }
+    NSString *lowerQuestion=question ?: @""; BOOL guarded=options.count==2 && [lowerQuestion hasPrefix:@"Really"];
+    __block BOOL ready=!guarded; __weak NHGurrOverlay *weakOverlay=overlay;
+    void (^selectIndex)(NSUInteger)=^(NSUInteger index){
+        if(index>=options.count || (guarded && !ready && index!=defaultIndex)) return;
+        int key=[options[index] characterAtIndex:0]; [weakOverlay dismiss]; if(completion)completion(key);
+    };
+    NSArray<UIButton *> *buttons=[overlay addChoiceButtons:options defaultIndex:defaultIndex select:selectIndex];
+    if(guarded) {
+        NSUInteger other=defaultIndex^1; if(other<buttons.count) buttons[other].enabled=NO;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.5*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+            ready=YES; if(other<buttons.count)buttons[other].enabled=YES;
+        });
+    }
+    overlay.hardwareKeyHandler=^BOOL(unichar key){
+        if(key==' ' || key=='\r' || key=='\n') { selectIndex(defaultIndex); return YES; }
+        if(key==27) {
+            NSUInteger index=NSNotFound;
+            for(NSUInteger i=0;i<options.count;i++) if([options[i] isEqual:@"q"]) { index=i; break; }
+            if(index==NSNotFound) for(NSUInteger i=0;i<options.count;i++) if([options[i] isEqual:@"n"]) { index=i; break; }
+            if(index==NSNotFound) {
+                if(!defaultKey)return YES;
+                NSUInteger fallback=NSNotFound;
+                for(NSUInteger i=0;i<options.count;i++) if([options[i] characterAtIndex:0]==(unichar)defaultKey) { fallback=i; break; }
+                if(fallback==NSNotFound) { [weakOverlay dismiss]; if(completion)completion(defaultKey); return YES; }
+                index=fallback;
+            }
+            selectIndex(index); return YES;
+        }
+        for(NSUInteger i=0;i<options.count;i++) if([options[i] characterAtIndex:0]==key) { selectIndex(i); return YES; }
+        return YES;
+    };
+    [overlay presentInView:self.view focusInput:NO];
+    return overlay;
+}
+- (id)textDialog:(NSNumber *)wid {
+    dispatch_semaphore_t ready=dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_main_queue(),^{
+        NSDictionary *window=self.windows[wid]; NSMutableArray<NSString *> *lines=[NSMutableArray new];
+        for(NSDictionary *item in window[@"items"]) [lines addObject:item[@"text"] ?: @""];
+        NHGurrOverlay *overlay=[self beginGameOverlay:window[@"title"] ?: @"NetHack"];
+        [overlay addTextView:[lines componentsJoinedByString:@"\n"] height:260];
+        __weak NHGurrOverlay *weakOverlay=overlay; __weak NHGame *weakSelf=self;
+        overlay.onDismiss=^{ [weakSelf restoreGameControls]; dispatch_semaphore_signal(ready); };
+        [overlay addActionWithTitle:@"OK" primary:YES handler:^{ [weakOverlay dismiss]; }];
+        overlay.hardwareKeyHandler=^BOOL(unichar key){ [weakOverlay dismiss]; return YES; };
+        [overlay presentInView:self.view focusInput:NO];
+    });
+    dispatch_semaphore_wait(ready,DISPATCH_TIME_FOREVER); return nil;
 }
 - (id)menu:(NSNumber *)wid how:(int)how {
     dispatch_semaphore_t ready=dispatch_semaphore_create(0); __block id result=nil;
@@ -219,7 +368,13 @@ static NHGame *game;
                         [self writeUIReady:@"UI_KEYBOARD"];
                         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC),dispatch_get_main_queue(),^{
                             [self showSettings];
-                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{ [self writeUIReady:@"UI_SETTINGS"]; });
+                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{
+                                [self writeUIReady:@"UI_SETTINGS"];
+                                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+                                    if(self.presentedViewController) [self dismissViewControllerAnimated:NO completion:^{ [self runModalUISmokeSequence]; }];
+                                    else [self runModalUISmokeSequence];
+                                });
+                            });
                         });
                     });
                 }
@@ -235,17 +390,45 @@ static NHGame *game;
     }
     if([name isEqual:@"askName"]) {
         NSString *last=[NSUserDefaults.standardUserDefaults stringForKey:@"player"] ?: @"Player";
-        NSString *value=[self prompt:@"캐릭터 이름 (같은 이름으로 저장 복원)" initial:last];
+        NSMutableArray *names=[[self promptHistoryForKey:@"playerHistory"] mutableCopy];
+        id saves=a.count>1?a[1]:nil;
+        if([saves isKindOfClass:NSArray.class]) {
+            NSMutableArray *merged=[NSMutableArray new]; if(last.length)[merged addObject:last];
+            for(id item in saves) if([item isKindOfClass:NSString.class] && [item length] && ![merged containsObject:item]) [merged addObject:item];
+            for(NSString *item in names) if(![merged containsObject:item])[merged addObject:item];
+            names=merged;
+        }
+        if(last.length && ![names containsObject:last]) [names insertObject:last atIndex:0];
+        if(names.count) [NSUserDefaults.standardUserDefaults setObject:names forKey:@"playerHistory"];
+        NSUInteger maxLength=a.count>0?MAX(1,[a[0] unsignedIntegerValue]):32;
+        NSString *value=[self prompt:@"Who are you?" initial:last historyKey:@"playerHistory" maxLength:maxLength focusInput:NO];
         if(value.length && ![value isEqual:@"\033"]) [NSUserDefaults.standardUserDefaults setObject:value forKey:@"player"];
         return [value stringByAppendingString:@"0"];
     }
-    if([name isEqual:@"getLine"])return [self prompt:NHText(a[0]) initial:@""];
+    if([name isEqual:@"getLine"]) {
+        NSString *title=NHText(a[0]);
+        if(a.count>2 && [a[2] boolValue] && self.history.count) {
+            NSArray *recent=[self.history subarrayWithRange:NSMakeRange(MAX(0,(NSInteger)self.history.count-2),MIN(2,self.history.count))];
+            title=[NSString stringWithFormat:@"%@\n%@",[recent componentsJoinedByString:@"\n"],title ?: @""];
+        }
+        NSUInteger maxLength=a.count>1?MAX(1,[a[1] unsignedIntegerValue]):200;
+        return [self prompt:title initial:@"" historyKey:@"lineHistory" maxLength:maxLength focusInput:YES];
+    }
+    if([name isEqual:@"ynFunction"]) {
+        NSString *question=NHText(a[0]),*choices=NHText(a[1]); int defaultKey=[a[2] intValue];
+        dispatch_sync(dispatch_get_main_queue(),^{
+            self.messages.text=[NSString stringWithFormat:@"%@ [%@]",question,choices];
+            [self.view setNeedsLayout]; [self showQuestion:question choices:choices defaultKey:defaultKey completion:^(int key){ [self enqueue:@[@(key)]]; }];
+            [self.messages scrollRangeToVisible:NSMakeRange(self.messages.text.length,0)];
+        });
+        return nil;
+    }
     if([name isEqual:@"selectMenu"])return [self menu:a[0] how:[a[1] intValue]];
     if([name isEqual:@"getDumplogDir"])return @".";
     if([name isEqual:@"displayWindow"]) {
         __block BOOL text=NO;
         dispatch_sync(dispatch_get_main_queue(),^{ int t=[self.windows[a[0]][@"type"] intValue]; text=t==4||t==5; if(t==1 && self.saveRequested && [a[1] boolValue])[self enqueue:@[@32]]; });
-        if(text) { id result=[self menu:a[0] how:0]; [self enqueue:@[@32]]; return result; }
+        if(text) { id result=[self textDialog:a[0]]; [self enqueue:@[@32]]; return result; }
     }
     if([name isEqual:@"delayOutput"]) { [NSThread sleepForTimeInterval:0.03]; return nil; }
     __block id result=nil;
@@ -272,7 +455,6 @@ static NHGame *game;
         else if([name isEqual:@"cliparound"]) { self.player=CGPointMake([a[2] floatValue],[a[3] floatValue]); CGFloat z=self.scroll.zoomScale; CGPoint p=CGPointMake([a[0] floatValue]*24*z-self.scroll.bounds.size.width/2,[a[1] floatValue]*24*z-self.scroll.bounds.size.height/2); p.x=MAX(0,MIN(p.x,self.scroll.contentSize.width-self.scroll.bounds.size.width)); p.y=MAX(0,MIN(p.y,self.scroll.contentSize.height-self.scroll.bounds.size.height)); if([NHPref(@"lockView",@YES) boolValue]) { if(self.scroll.contentSize.width<=self.scroll.bounds.size.width)p.x=0; if(self.scroll.contentSize.height<=self.scroll.bounds.size.height)p.y=0; } [self.scroll setContentOffset:p animated:NO]; }
         else if([name isEqual:@"addMenu"]) [self.windows[a[0]][@"items"] addObject:@{@"id":a[2],@"text":NHText(a[6]),@"selected":a[7]}];
         else if([name isEqual:@"endMenu"]) self.windows[a[0]][@"title"]=NHText(a[1]);
-        else if([name isEqual:@"ynFunction"]) { self.messages.text=[NSString stringWithFormat:@"%@ [%@]",NHText(a[0]),NHText(a[1])]; [self.view setNeedsLayout]; self.keyboardPanel.hidden=NO; [self.messages scrollRangeToVisible:NSMakeRange(self.messages.text.length,0)]; }
         else if([name isEqual:@"setNumPadOption"]) { self.numpad=[a[0] boolValue]; [self applyPreferences]; }
         else if([name isEqual:@"askDirection"]) { self.expectsDirection=YES; [self updateDirectionOverlay]; }
         else if([name isEqual:@"copyText"]) UIPasteboard.generalPasteboard.string=NHText(a[0]);
