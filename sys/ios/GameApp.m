@@ -131,6 +131,9 @@ static NHGame *game;
         if(![NSFileManager.defaultManager fileExistsAtPath:dest.path]) [NSFileManager.defaultManager copyItemAtURL:source toURL:dest error:&error];
     }
     [NSFileManager.defaultManager createDirectoryAtURL:[dir URLByAppendingPathComponent:@"save"] withIntermediateDirectories:YES attributes:nil error:&error];
+    if([NSProcessInfo.processInfo.arguments containsObject:@"--ui-smoke"]) {
+        [@"OPTIONS=name:UIProbe,role:Valkyrie,race:human,gender:female,align:lawful\nOPTIONS=!legacy,!autopickup,force_invmenu\n" writeToURL:[dir URLByAppendingPathComponent:@"defaults.nh"] atomically:YES encoding:NSUTF8StringEncoding error:&error];
+    }
     if(error) { self.messages.text=error.localizedDescription; return; }
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
         NHRun(dir.path.UTF8String);
@@ -194,7 +197,14 @@ static NHGame *game;
 - (id)invoke:(NSString *)name arguments:(NSArray *)a {
     if([name isEqual:@"receiveKeyCmd"] || [name isEqual:@"receivePosKeyCmd"]) {
         BOOL pos=[name isEqual:@"receivePosKeyCmd"];
-        dispatch_sync(dispatch_get_main_queue(),^{ self.mouseLocked=pos && [a[0] boolValue]; });
+        if(!pos && [NSProcessInfo.processInfo.arguments containsObject:@"--ui-smoke"])return @32;
+        dispatch_sync(dispatch_get_main_queue(),^{
+            self.mouseLocked=pos && [a[0] boolValue];
+            if(pos && self.map.cells.count && [NSProcessInfo.processInfo.arguments containsObject:@"--ui-smoke"]) {
+                NSURL *docs=[NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
+                [@"Map displayed and engine waiting for gameplay input" writeToURL:[docs URLByAppendingPathComponent:@"UI_READY"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+            }
+        });
         [self.inputCondition lock];
         NSArray *event=nil;
         do { while(!self.input.count)[self.inputCondition wait]; event=self.input.firstObject; [self.input removeObjectAtIndex:0]; } while(!pos && [event[0] intValue]==0);
@@ -249,7 +259,7 @@ static NHGame *game;
 id NHInvoke(NSString *name,NSArray *args) { return [game invoke:name arguments:args]; }
 
 @interface NHApp : UIResponder <UIApplicationDelegate>
-@property UIWindow *window;
+@property (nonatomic,strong) UIWindow *window;
 @end
 @implementation NHApp
 - (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {

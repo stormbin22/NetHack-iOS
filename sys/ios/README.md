@@ -1,28 +1,37 @@
-# iPhone port — work in progress
+# NetHack iOS — early playable port
 
-Target: iPhone 14 Pro, user-reported iOS 26.6.2; personal installation using existing SideStore.
+Target: iPhone 14 Pro; personal installation with SideStore. The user verified installation of the initial probe on their reported iOS 26.6.2 device.
 
-## Current deliverable
+## Build and install
 
-The Swift application is an **installation probe only**. It does not link or run NetHack and does not reproduce the Android UI yet. No iOS compilation or device installation has been verified locally (the development host is Windows).
+The **iOS game build** workflow compiles the game on macOS and creates `NetHack-ios-unsigned.ipa`. Download its artifact ZIP, extract the IPA in Files on the iPhone, and import it into SideStore. Keep the existing app installed when updating to retain its sandbox. Signing happens in SideStore; no Apple credentials are needed in this repository.
 
-Run the `iOS installation probe` workflow manually in the user's GitHub repository. Download the artifact ZIP, extract `NetHack-install-probe-unsigned.ipa`, transfer it to Files on the iPhone, and import it into SideStore. Signing takes place in SideStore; do not upload Apple passwords, certificates, or pairing files to GitHub. A successful launch displays an installation confirmation.
+On a Mac with Xcode: `bash sys/ios/build.sh game`. Run `python3 sys/ios/simulate.py` afterward to launch the UIKit app in an available iPhone simulator and capture its game screen. The original Swift installation probe remains available through `bash sys/ios/build.sh` and the separate manual workflow.
 
-macOS local equivalent: `bash sys/ios/build.sh` with Xcode installed. The output targets arm64 iPhone devices, not the simulator.
+## Implemented
+
+- Real NetHack 5.0.0 C engine, Lua 5.4.8, generated game data, and original default tiles.
+- Reuse of the Android C window port through an in-process compatibility adapter. There is no Java VM in the app.
+- Background engine thread; UIKit map, messages, status, menus, name/text prompts, and input queue.
+- Eight-direction buttons, basic command buttons, keyboard input, pan/pinch, map targeting, directional tap and long-press travel.
+- Save-and-exit command; restoring by entering the same character name after relaunch.
+- Writable data under Documents/NetHack, visible through Files. Backgrounding requests a save on the engine thread within an iOS background task. iOS can interrupt this; use Save explicitly before ending a session.
+
+## Verification
+
+CI runs the actual engine and adapter as a native macOS executable in a temporary playground: start a game, render glyphs, process four turns, save, start a fresh process, restore, process four more turns, and save again. It requires a nonempty save file and a restoration message. This passed in game build #3.
+
+The additional simulator check launches the actual UIKit binary using a dedicated test character and waits for a rendered map at the engine's gameplay input boundary. It does not replace physical-device touch testing or exercise the interactive character-selection dialogs.
+
+## Still to match against Android
+
+This is **not yet a visually identical ForkFront port**. Command panels, overlay layout, preferences, selectable tile sets, menu quantity entry, sounds, message-history presentation, and detailed gesture thresholds still need work. Keyboard and menus currently use basic UIKit controls. Long sessions, interruptions during dialogs, and iPhone save/relaunch behavior need device verification.
+
+The current frontend ends after Save; close and reopen the app to resume with the same name. The engine is not reinitialized in-process.
 
 ## Source baseline
 
-- NetHack-Android: f7c0d78 (5.0.0, post-release source).
-- ForkFront-Android: tag 2.8, commit 1ce8a040c932992fa125d2775160f2556d5601e6.
-- Upstream game and frontend notices must be retained when incorporating their source/assets.
-
-## Remaining implementation
-
-1. Build host tools and game data, initialize the pinned Lua submodule, and cross-compile the C engine for iOS.
-2. Replace Android JNI callbacks in `sys/android/winandroid.c` with an iOS window port and a blocking input queue; keep engine execution off the UI thread.
-3. Reproduce ForkFront windows, status, messages, menus, questions, and custom keyboard.
-4. Translate `NHW_Map.java` touch state machine: press, long press, pan, pinch, pointer transitions, coordinate conversion, and cancellation. Match preferences and thresholds rather than assuming default iOS recognizers behave identically.
-5. Implement writable sandbox data directories, save/restore, and lifecycle handling. Do not rely on app termination callbacks to save.
-6. Compare Android/iPhone screens and touch sequences; verify new game, movement, inventory, targeting, save/relaunch, rotation, and interrupted gestures.
-
-Installation success alone does not validate any of these remaining items.
+- NetHack-Android: f7c0d7851b854cc7b1ca09b2c193e8620f2962d9.
+- ForkFront touch behavior reference: tag 2.8, commit 1ce8a040c932992fa125d2775160f2556d5601e6.
+- Lua version matches the Android build's 5.4.8 setting. Host generators and device libraries are built separately.
+- Upstream license and notices are retained; the game data bundle includes `license`.
