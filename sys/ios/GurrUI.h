@@ -145,7 +145,8 @@ static NSArray<NSNumber *> *NHCommandKeys(NSString *command) {
 - (UITextField *)addInputWithInitialText:(NSString *)text keyboardType:(UIKeyboardType)keyboardType maxLength:(NSUInteger)maxLength {
     _maxLength=maxLength;
     UIView *row=[UIView new];
-    _inputField=[NHGurrInputField new]; _inputField.borderStyle=UITextBorderStyleRoundedRect; _inputField.backgroundColor=UIColor.whiteColor;
+    _inputField=[NHGurrInputField new]; _inputField.translatesAutoresizingMaskIntoConstraints=NO;
+    _inputField.borderStyle=UITextBorderStyleRoundedRect; _inputField.backgroundColor=UIColor.whiteColor;
     _inputField.textColor=UIColor.blackColor; _inputField.font=[UIFont systemFontOfSize:17];
     _inputField.autocapitalizationType=UITextAutocapitalizationTypeNone; _inputField.autocorrectionType=UITextAutocorrectionTypeNo;
     _inputField.spellCheckingType=UITextSpellCheckingTypeNo; _inputField.keyboardType=keyboardType;

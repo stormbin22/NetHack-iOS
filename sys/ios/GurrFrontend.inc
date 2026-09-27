@@ -202,7 +202,7 @@
     BOOL hasPan=NO,hasPinch=NO; for(UIGestureRecognizer *gesture in self.map.gestureRecognizers) { hasPan|=[gesture isKindOfClass:UIPanGestureRecognizer.class]; hasPinch|=[gesture isKindOfClass:UIPinchGestureRecognizer.class]; }
     NSCAssert(hasPan && hasPinch,@"Gurr map drag/pinch gestures are missing");
     self.map.origin=oldOrigin; self.map.scale=oldScale; [self.map setNeedsDisplay];
-    [self writeUIReady:@"UI_MAP_GESTURES"];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{ [self writeUIReady:@"UI_MAP_GESTURES"]; });
     NHMenu *single=[NHMenu new]; single.how=1; single.selection=[NSMutableDictionary new]; single.items=@[@{@"id":@9003,@"text":@"2 darts",@"acc":@100}]; __block id singleResult=nil;
     single.finish=^(id value){singleResult=value;}; single.keyboardCount=1; [single activateRow:0];
     NSCAssert([singleResult isKindOfClass:NHBuffer.class] && ((NHBuffer *)singleResult).data.length==2*sizeof(jlong),@"PickOne did not return one item/count pair");
@@ -211,7 +211,7 @@
     NHMenu *none=[NHMenu new]; none.how=0; none.items=@[@{@"id":@0,@"text":@"History line"}]; __block id noneResult=nil;
     none.finish=^(id value){noneResult=value;}; [none activateRow:0];
     NSCAssert([noneResult isKindOfClass:NHBuffer.class] && ((NHBuffer *)noneResult).data.length==0,@"PickNone did not return an empty selection");
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC),dispatch_get_main_queue(),^{
         NHMenu *menu=[NHMenu new]; menu.how=2; menu.title=@"Pick up what?"; menu.tileImage=self.map.tiles; menu.tileSize=self.map.tileSize;
         menu.items=@[
             @{@"tile":@(-1),@"id":@0,@"acc":@0,@"group":@0,@"attr":@2,@"text":@"Items on the floor",@"selected":@NO,@"color":@0},
@@ -267,6 +267,9 @@
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [weakSelf writeUIReady:@"UI_PROMPT_CANCEL"]; });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(8*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ if(cancelPrompt.onInputEscape)cancelPrompt.onInputEscape(); });
     }];
+    NSCAssert(prompt.inputField && [prompt.inputField.text isEqual:@"shopkeeper"] &&
+              CGRectGetWidth(prompt.inputField.bounds)>100 && CGRectGetHeight(prompt.inputField.bounds)>=40,
+              @"Prompt input did not display its initial text in the Gurr-style field");
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [weakSelf writeUIReady:@"UI_PROMPT"]; });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(8*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ prompt.inputField.text=@"Goblin"; if(prompt.onInputReturn)prompt.onInputReturn(); });
 }
