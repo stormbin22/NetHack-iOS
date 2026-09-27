@@ -192,7 +192,7 @@ static NHGame *game;
     if([name isEqual:@"displayWindow"]) {
         __block BOOL text=NO;
         dispatch_sync(dispatch_get_main_queue(),^{ int t=[self.windows[a[0]][@"type"] intValue]; text=t==4||t==5; });
-        if(text)return [self menu:a[0] how:0];
+        if(text) { id result=[self menu:a[0] how:0]; [self enqueue:@[@32]]; return result; }
     }
     if([name isEqual:@"delayOutput"]) { [NSThread sleepForTimeInterval:0.03]; return nil; }
     __block id result=nil;

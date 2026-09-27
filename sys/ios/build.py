@@ -71,7 +71,7 @@ sources += [str(p) for p in lua.glob("*.c") if p.name not in ("lua.c", "luac.c")
 # iOS has no command shell. Lua os.execute must report that it is unavailable.
 loslib=lua/"loslib.c"
 luaos=loslib.read_text()
-luaos=luaos.replace("system(cmd)", "((cmd) == NULL ? 0 : -1)")
+luaos=re.sub(r"\bsystem\(cmd\)", "((cmd) == NULL ? 0 : -1)", luaos)
 loslib.write_text(luaos)
 
 sdk=run("xcrun", "--sdk", "iphoneos", "--show-sdk-path")
@@ -102,6 +102,34 @@ for file in (ROOT/"dat").iterdir():
     if file.is_file() and file.name not in ("Makefile",): shutil.copy2(file,data/file.name)
 shutil.copy2(ROOT/"sys/android/defaults.nh",data/"defaults.nh")
 for file in (ROOT/"sys/android/app/res/drawable-nodpi").glob("*.png"): shutil.copy2(file,app/file.name)
+
+# Native macOS execution tests use exactly the same engine and JNI adapter.
+# Run each session in a fresh process, like relaunching the iPhone app.
+print("Checking new game, turns, save, and restore on host", flush=True)
+smokeobj=OUT/"smoke-objects"
+smokeobj.mkdir(exist_ok=True)
+def compile_smoke(source):
+    obj=smokeobj/(Path(source).stem+".o")
+    run("xcrun", "clang", *common, "-c", source, "-o", obj)
+    return obj
+with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+    smoke=list(pool.map(compile_smoke, sources))
+for source in ("Bridge.m", "Smoke.m"):
+    obj=smokeobj/(source+".o")
+    run("xcrun", "clang", "-fobjc-arc", "-fmodules", "-Isys/ios", "-c", "sys/ios/"+source, "-o", obj)
+    smoke.append(obj)
+runner=OUT/"engine-smoke"
+run("xcrun", "clang", *smoke, "-framework", "Foundation", "-o", runner)
+play=OUT/"smoke-playground"
+shutil.copytree(data,play,dirs_exist_ok=True)
+(play/"save").mkdir(exist_ok=True)
+(play/"defaults.nh").write_text("OPTIONS=name:PortTest,role:Valkyrie,race:human,gender:female,align:lawful\nOPTIONS=!autopickup,!legacy\n")
+for phase in ([], ["restore"]):
+    check=subprocess.run([str(runner),str(play),*phase],capture_output=True,text=True,timeout=60)
+    print(check.stdout,flush=True)
+    if check.returncode: print(check.stderr,flush=True); raise SystemExit(check.returncode)
+    saves=[p for p in (play/"save").iterdir() if p.is_file() and p.suffix!=".bak"]
+    if not saves or not all(p.stat().st_size>0 for p in saves): raise RuntimeError("No nonempty save file")
 ipa=OUT/"NetHack-ios-unsigned.ipa"
 with zipfile.ZipFile(ipa,"w",zipfile.ZIP_DEFLATED) as archive:
     for file in app.rglob("*"):
