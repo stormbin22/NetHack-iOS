@@ -1,0 +1,18 @@
+name: iOS installation probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile device application and package unsigned IPA
+        run: bash sys/ios/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NetHack-install-probe-unsigned
+          path: build/ios/NetHack-install-probe-unsigned.ipa
+          if-no-files-found: error
