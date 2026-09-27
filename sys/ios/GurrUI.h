@@ -47,6 +47,7 @@ static NSArray<NSNumber *> *NHCommandKeys(NSString *command) {
 @property (nonatomic,copy) void (^onInputEscape)(void);
 - (instancetype)initWithTitle:(NSString *)title;
 - (UILabel *)addMessage:(NSString *)message;
+- (void)addCustomView:(UIView *)view height:(CGFloat)height;
 - (UITextField *)addInputWithInitialText:(NSString *)text keyboardType:(UIKeyboardType)keyboardType maxLength:(NSUInteger)maxLength;
 - (void)addHistoryItems:(NSArray<NSString *> *)items select:(void (^)(NSString *value))select;
 - (void)addTextView:(NSString *)text height:(CGFloat)height;
@@ -135,6 +136,11 @@ static NSArray<NSNumber *> *NHCommandKeys(NSString *command) {
     UILabel *label=[UILabel new]; label.text=message; label.textColor=[UIColor colorWithWhite:0.92 alpha:1];
     label.font=[UIFont systemFontOfSize:16]; label.numberOfLines=0; label.accessibilityIdentifier=@"gurr.modal.message";
     [self insertContent:label]; return label;
+}
+- (void)addCustomView:(UIView *)view height:(CGFloat)height {
+    if(!view)return;
+    [view.heightAnchor constraintEqualToConstant:height].active=YES;
+    [self insertContent:view];
 }
 - (UITextField *)addInputWithInitialText:(NSString *)text keyboardType:(UIKeyboardType)keyboardType maxLength:(NSUInteger)maxLength {
     _maxLength=maxLength;

@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import "Bridge.h"
 #import "GurrUI.h"
+#include <math.h>
 
 static UIColor *NHColor(int rgb) {
     return [UIColor colorWithRed:((rgb>>16)&255)/255.0 green:((rgb>>8)&255)/255.0 blue:(rgb&255)/255.0 alpha:1];
@@ -10,19 +11,62 @@ static UIColor *NHColor(int rgb) {
 @property UIImage *tiles;
 @property CGSize tileSize;
 @property CGPoint cursor;
+@property CGPoint origin;
+@property CGFloat scale;
+- (CGPoint)tileAtViewPoint:(CGPoint)point;
+- (CGPoint)centerForTile:(CGPoint)tile;
+- (void)centerOnTile:(CGPoint)tile lockView:(BOOL)lockView;
+- (BOOL)panBy:(CGPoint)delta allowWhenLocked:(BOOL)allowWhenLocked;
+- (BOOL)zoomByFactor:(CGFloat)factor aroundPoint:(CGPoint)point;
 @end
 @implementation NHMap
 - (instancetype)init {
-    if ((self=[super initWithFrame:CGRectMake(0,0,80*24,21*24)])) {
+    if ((self=[super initWithFrame:CGRectZero])) {
         self.cells=[NSMutableDictionary new]; self.backgroundColor=UIColor.blackColor;
         self.tiles=[UIImage imageWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"default_16x16" ofType:@"png"]];
-        self.cursor=CGPointMake(-1,-1); self.tileSize=CGSizeMake(16,16);
+        self.cursor=CGPointMake(-1,-1); self.tileSize=CGSizeMake(16,16); self.scale=1;
     } return self;
+}
+- (CGPoint)tileAtViewPoint:(CGPoint)point {
+    CGFloat side=24*MAX(0.01,self.scale);
+    return CGPointMake(floor((point.x-self.origin.x)/side),floor((point.y-self.origin.y)/side));
+}
+- (CGPoint)centerForTile:(CGPoint)tile {
+    CGFloat side=24*self.scale;
+    return CGPointMake(self.origin.x+(tile.x+0.5)*side,self.origin.y+(tile.y+0.5)*side);
+}
+- (void)centerOnTile:(CGPoint)tile lockView:(BOOL)lockView {
+    CGFloat side=24*self.scale, mapWidth=80*side, mapHeight=21*side;
+    if(lockView && mapWidth<=self.bounds.size.width && mapHeight<=self.bounds.size.height) {
+        self.origin=CGPointMake((self.bounds.size.width-mapWidth)/2,(self.bounds.size.height-mapHeight)/2);
+    } else {
+        self.origin=CGPointMake(self.bounds.size.width/2-(tile.x+0.5)*side,self.bounds.size.height/2-(tile.y+0.5)*side);
+    }
+    [self setNeedsDisplay];
+}
+- (BOOL)panBy:(CGPoint)delta allowWhenLocked:(BOOL)allowWhenLocked {
+    CGFloat side=24*self.scale;
+    BOOL locked=[NHPref(@"lockView",@YES) boolValue] && 80*side<=self.bounds.size.width && 21*side<=self.bounds.size.height;
+    if(locked && !allowWhenLocked)return NO;
+    self.origin=CGPointMake(self.origin.x+delta.x,self.origin.y+delta.y);
+    [self setNeedsDisplay]; return YES;
+}
+- (BOOL)zoomByFactor:(CGFloat)factor aroundPoint:(CGPoint)point {
+    if(!isfinite(factor) || factor<=0)return NO;
+    CGFloat oldScale=self.scale, next=MIN(4,MAX(0.2,oldScale*factor));
+    if(fabs(next-oldScale)<0.0001)return NO;
+    CGFloat side=24*oldScale;
+    CGPoint tile=CGPointMake((point.x-self.origin.x)/side,(point.y-self.origin.y)/side);
+    self.scale=next;
+    CGFloat nextSide=24*next;
+    self.origin=CGPointMake(point.x-tile.x*nextSide,point.y-tile.y*nextSide);
+    [self setNeedsDisplay]; return YES;
 }
 - (void)drawRect:(CGRect)rect {
     CGContextRef ctx=UIGraphicsGetCurrentContext(); CGContextSetInterpolationQuality(ctx,kCGInterpolationNone);
+    CGFloat side=24*self.scale;
     for (NSNumber *key in self.cells) {
-        int k=key.intValue; CGRect r=CGRectMake((k%80)*24,(k/80)*24,24,24);
+        int k=key.intValue; CGRect r=CGRectMake(self.origin.x+(k%80)*side,self.origin.y+(k/80)*side,side,side);
         if (!CGRectIntersectsRect(rect,r)) continue;
         NSArray *v=self.cells[key]; int tile=[v[0] intValue];
         int tw=MAX(1,self.tileSize.width),th=MAX(1,self.tileSize.height); int cols=(int)self.tiles.size.width/tw, rows=(int)self.tiles.size.height/th;
@@ -30,81 +74,263 @@ static UIColor *NHColor(int rgb) {
             CGImageRef crop=CGImageCreateWithImageInRect(self.tiles.CGImage,CGRectMake((tile%cols)*tw,(tile/cols)*th,tw,th));
             [[UIImage imageWithCGImage:crop] drawInRect:r]; CGImageRelease(crop);
         } else {
-            unichar c=[v[1] intValue]; [[NSString stringWithCharacters:&c length:1] drawInRect:r withAttributes:@{
-                NSFontAttributeName:[UIFont monospacedSystemFontOfSize:21 weight:UIFontWeightRegular],NSForegroundColorAttributeName:NHColor([v[2] intValue])}];
+            unichar c=[v[1] intValue]; [[NSString stringWithCharacters:&c length:1] drawInRect:CGRectInset(r,0.5,0.5) withAttributes:@{
+                NSFontAttributeName:[UIFont monospacedSystemFontOfSize:21*self.scale weight:UIFontWeightRegular],NSForegroundColorAttributeName:NHColor([v[2] intValue])}];
         }
     }
     if(self.cursor.x>=0) {
-        [UIColor.yellowColor setStroke]; CGContextSetLineWidth(ctx,1);
-        CGContextStrokeRect(ctx,CGRectMake(self.cursor.x*24+1,self.cursor.y*24+1,22,22));
+        [UIColor.yellowColor setStroke]; CGContextSetLineWidth(ctx,MAX(1,self.scale));
+        CGContextStrokeRect(ctx,CGRectMake(self.origin.x+self.cursor.x*side+1,self.origin.y+self.cursor.y*side+1,side-2,side-2));
     }
 }
 @end
 
-@interface NHMenu : UITableViewController
+@class NHGame;
+@interface NHMenu : NSObject
 @property NSArray<NSDictionary *> *items;
 @property NSMutableDictionary<NSNumber *,NSNumber *> *selection;
 @property int how;
 @property(copy) void (^finish)(id);
+@property(nonatomic,copy) NSString *title;
+@property(nonatomic,strong) NHGurrOverlay *overlay;
+@property(nonatomic,strong) UIStackView *rows;
+@property(nonatomic,strong) UIScrollView *list;
+@property(nonatomic,strong) NSArray<NSNumber *> *accelerators;
+@property(nonatomic,strong) UIImage *tileImage;
+@property(nonatomic) CGSize tileSize;
+@property(nonatomic) NSInteger focusedIndex;
+@property(nonatomic) NSInteger keyboardCount;
+@property(nonatomic) BOOL allSelected;
+@property(nonatomic,strong) UIButton *selectAllButton;
+- (void)presentInView:(UIView *)view;
+- (void)activateRow:(NSUInteger)index;
 @end
 @implementation NHMenu
-- (void)viewDidLoad {
-    [super viewDidLoad]; self.overrideUserInterfaceStyle=UIUserInterfaceStyleDark; self.selection=[NSMutableDictionary new];
-    UILongPressGestureRecognizer *quantity=[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(quantity:)]; [self.tableView addGestureRecognizer:quantity];
-    for(NSDictionary *item in self.items) if([item[@"selected"] boolValue] && [item[@"id"] longLongValue]) self.selection[item[@"id"]]=@(-1);
-    self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(cancel)];
-    self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(done)];
-    self.tableView.allowsMultipleSelection=self.how==2;
+- (BOOL)isHeader:(NSDictionary *)item {
+    return [item[@"id"] longLongValue]==0 && [item[@"acc"] intValue]==0 && [item[@"attr"] intValue]==2;
 }
-- (void)complete:(id)value { void (^callback)(id)=self.finish; self.finish=nil; [self dismissViewControllerAnimated:YES completion:^{ if(callback)callback(value); }]; }
-- (void)cancel { [self complete:nil]; }
-- (void)quantity:(UILongPressGestureRecognizer *)press {
-    if(press.state!=UIGestureRecognizerStateBegan || !self.how)return;
-    NSIndexPath *path=[self.tableView indexPathForRowAtPoint:[press locationInView:self.tableView]]; if(!path)return;
-    NSDictionary *item=self.items[path.row]; NSNumber *ident=item[@"id"]; if(!ident.longLongValue)return;
+- (NSDictionary<NSString *,NSString *> *)displayPartsForItem:(NSDictionary *)item {
+    NSString *text=item[@"text"] ?: @"";
+    if([self isHeader:item])return @{@"name":text,@"subtext":@""};
+    NSRange weightOpen=[text rangeOfString:@"{" options:NSBackwardsSearch];
+    NSRange weightClose=[text rangeOfString:@"}" options:NSBackwardsSearch];
+    NSRange status=[text rangeOfString:@" (" options:NSBackwardsSearch];
+    NSRange statusClose=[text rangeOfString:@")" options:NSBackwardsSearch];
+    BOOL hasStatus=status.location!=NSNotFound && statusClose.location>status.location &&
+        (statusClose.location==text.length-1 || (weightClose.location==text.length-1 && weightOpen.location>statusClose.location));
+    NSUInteger nameEnd=text.length;
+    NSMutableArray<NSString *> *subtext=[NSMutableArray new];
+    if(hasStatus) {
+        nameEnd=status.location+1;
+        [subtext addObject:[text substringWithRange:NSMakeRange(status.location+2,statusClose.location-status.location-2)]];
+    }
+    if(weightOpen.location!=NSNotFound && weightClose.location>weightOpen.location) {
+        if(!hasStatus)nameEnd=MIN(nameEnd,weightOpen.location);
+        [subtext addObject:[@"w:" stringByAppendingString:[text substringWithRange:NSMakeRange(weightOpen.location+1,weightClose.location-weightOpen.location-1)]]];
+    }
+    NSString *name=[[text substringToIndex:nameEnd] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSUInteger countEnd=0;
+    while(countEnd<name.length && [NSCharacterSet.decimalDigitCharacterSet characterIsMember:[name characterAtIndex:countEnd]])countEnd++;
+    if(countEnd && [[name substringToIndex:countEnd] longLongValue]>0)
+        name=[[name substringFromIndex:countEnd] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return @{@"name":name,@"subtext":[subtext componentsJoinedByString:@"; "]};
+}
+- (NSInteger)maxCountForItem:(NSDictionary *)item {
+    NSString *text=item[@"text"] ?: @""; NSScanner *scanner=[NSScanner scannerWithString:text]; unsigned long long value=0;
+    if([scanner scanUnsignedLongLong:&value] && value>0 && scanner.scanLocation>0)return (NSInteger)MIN(value,(unsigned long long)NSIntegerMax);
+    return 1;
+}
+- (NSArray<NSNumber *> *)preparedAccelerators {
+    BOOL explicit=NO; for(NSDictionary *item in self.items) if([item[@"acc"] intValue]) { explicit=YES; break; }
+    NSMutableArray *result=[NSMutableArray new]; unichar next='a';
+    for(NSDictionary *item in self.items) {
+        NSInteger acc=[item[@"acc"] intValue];
+        if(!explicit && ![self isHeader:item] && [item[@"id"] longLongValue]) {
+            if(next=='z'+1)next='A'; else if(next=='Z'+1)next=0;
+            if(next) { acc=next; next++; }
+        }
+        [result addObject:@(acc)];
+    }
+    return result;
+}
+- (void)presentInView:(UIView *)view {
+    self.selection=[NSMutableDictionary new]; self.keyboardCount=-1; self.focusedIndex=-1;
+    for(NSDictionary *item in self.items) if([item[@"selected"] boolValue] && [item[@"id"] longLongValue]) self.selection[item[@"id"]]=@(-1);
+    self.accelerators=[self preparedAccelerators];
+    if(!self.overlay)self.overlay=[[NHGurrOverlay alloc] initWithTitle:self.title ?: @"NetHack"];
+    self.list=[UIScrollView new]; self.list.translatesAutoresizingMaskIntoConstraints=NO; self.list.accessibilityIdentifier=@"gurr.menu.list";
+    self.rows=[UIStackView new]; self.rows.axis=UILayoutConstraintAxisVertical; self.rows.spacing=3; self.rows.translatesAutoresizingMaskIntoConstraints=NO;
+    [self.list addSubview:self.rows];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.rows.topAnchor constraintEqualToAnchor:self.list.contentLayoutGuide.topAnchor], [self.rows.bottomAnchor constraintEqualToAnchor:self.list.contentLayoutGuide.bottomAnchor],
+        [self.rows.leadingAnchor constraintEqualToAnchor:self.list.contentLayoutGuide.leadingAnchor], [self.rows.trailingAnchor constraintEqualToAnchor:self.list.contentLayoutGuide.trailingAnchor],
+        [self.rows.widthAnchor constraintEqualToAnchor:self.list.frameLayoutGuide.widthAnchor]
+    ]];
+    CGFloat safeHeight=MAX(0,view.bounds.size.height-view.safeAreaInsets.top-view.safeAreaInsets.bottom);
+    [self.overlay addCustomView:self.list height:MIN(430,MAX(120,safeHeight-220))];
+    for(NSUInteger i=0;i<self.items.count;i++) [self addRowAtIndex:i];
+    __weak NHMenu *weakSelf=self;
+    self.overlay.hardwareKeyHandler=^BOOL(unichar key){ return [weakSelf handleKey:key]; };
+    if(self.how==2) {
+        self.selectAllButton=[self.overlay addActionWithTitle:@"Select all" primary:NO handler:^{ [weakSelf selectAll:!weakSelf.allSelected]; }];
+        [self.overlay addActionWithTitle:@"Done" primary:YES handler:^{ [weakSelf accept]; }];
+        [self.overlay addActionWithTitle:@"Cancel" primary:NO handler:^{ [weakSelf complete:nil]; }];
+    } else if(self.how==1) {
+        [self.overlay addActionWithTitle:@"Cancel" primary:NO handler:^{ [weakSelf complete:nil]; }];
+        [self.overlay addActionWithTitle:@"OK" primary:YES handler:^{ [weakSelf accept]; }];
+    } else {
+        [self.overlay addActionWithTitle:self.how==0?@"Close":@"Cancel" primary:NO handler:^{ if(weakSelf.how==0)[weakSelf accept]; else [weakSelf complete:nil]; }];
+    }
+    [self.overlay presentInView:view focusInput:NO];
+}
+- (NSString *)rowTitle:(NSUInteger)index {
+    NSDictionary *item=self.items[index]; NSNumber *ident=item[@"id"];
+    BOOL selectable=[ident longLongValue]!=0 && ![self isHeader:item];
+    unichar acc=index<self.accelerators.count?[self.accelerators[index] unsignedShortValue]:0;
+    NSString *shortcut=selectable&&acc?[NSString stringWithFormat:@"%C",acc]:@" ";
+    NSNumber *count=self.selection[ident];
+    NSString *check=self.how==2&&selectable?(count?@"[x] ":@"[ ] "):@"";
+    if(selectable && count && count.longLongValue>0)check=[NSString stringWithFormat:@"%@%ld ",check,(long)count.longValue];
+    NSDictionary *parts=[self displayPartsForItem:item];
+    NSString *name=parts[@"name"] ?: @"", *subtext=parts[@"subtext"] ?: @"";
+    return [NSString stringWithFormat:@"%@%@  %@%@%@",check,shortcut,name,subtext.length?@"\n":@"",subtext];
+}
+- (NSAttributedString *)styledTitleForRow:(NSUInteger)index font:(UIFont *)font {
+    NSDictionary *item=self.items[index]; NSInteger attr=[item[@"attr"] intValue]; BOOL header=[self isHeader:item];
+    UIColor *color=header?UIColor.blackColor:((attr&4)?UIColor.lightGrayColor:((attr&32)?[UIColor colorWithRed:1 green:0.7 blue:0.2 alpha:1]:UIColor.whiteColor));
+    if(item[@"color"] && item[@"color"]!=NSNull.null && [item[@"color"] intValue])color=NHColor([item[@"color"] intValue]);
+    if(attr&2)font=[UIFont monospacedSystemFontOfSize:font.pointSize weight:UIFontWeightSemibold];
+    NSMutableDictionary *attributes=[@{NSFontAttributeName:font,NSForegroundColorAttributeName:color} mutableCopy];
+    if(attr&16)attributes[NSUnderlineStyleAttributeName]=@(NSUnderlineStyleSingle);
+    NSMutableAttributedString *title=[[NSMutableAttributedString alloc] initWithString:[self rowTitle:index] attributes:attributes];
+    NSRange subtext=[title.string rangeOfString:@"\n" options:NSBackwardsSearch];
+    if(subtext.location!=NSNotFound && subtext.location+1<title.length)
+        [title addAttribute:NSForegroundColorAttributeName value:UIColor.lightGrayColor range:NSMakeRange(subtext.location+1,title.length-subtext.location-1)];
+    return title;
+}
+- (void)addRowAtIndex:(NSUInteger)index {
+    NSDictionary *item=self.items[index]; BOOL header=[self isHeader:item]; NSInteger attr=[item[@"attr"] intValue];
+    UIButton *button=[UIButton buttonWithType:UIButtonTypeCustom]; button.tag=10000+index;
+    button.accessibilityIdentifier=[NSString stringWithFormat:@"gurr.menu.row.%lu",(unsigned long)index];
+    button.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeft; button.contentEdgeInsets=UIEdgeInsetsMake(7,10,7,8);
+    button.titleLabel.numberOfLines=0; button.titleLabel.font=[UIFont monospacedSystemFontOfSize:15 weight:(header||(attr&2))?UIFontWeightBold:UIFontWeightRegular];
+    button.layer.cornerRadius=3; button.backgroundColor=header?[UIColor colorWithWhite:0.82 alpha:1]:[UIColor colorWithWhite:0.20 alpha:1];
+    [button setAttributedTitle:[self styledTitleForRow:index font:button.titleLabel.font] forState:UIControlStateNormal];
+    if(self.tileImage.CGImage && self.tileSize.width>0 && self.tileSize.height>0) {
+        NSInteger tile=[item[@"tile"] integerValue]; NSInteger tw=self.tileSize.width,th=self.tileSize.height,cols=(NSInteger)self.tileImage.size.width/tw;
+        if(tile>=0 && cols>0) { CGImageRef crop=CGImageCreateWithImageInRect(self.tileImage.CGImage,CGRectMake((tile%cols)*tw,(tile/cols)*th,tw,th)); if(crop) { [button setImage:[UIImage imageWithCGImage:crop] forState:UIControlStateNormal]; CGImageRelease(crop); button.imageView.contentMode=UIViewContentModeScaleAspectFit; button.imageEdgeInsets=UIEdgeInsetsMake(2,0,2,6); button.titleEdgeInsets=UIEdgeInsetsMake(0,6,0,0); } }
+    }
+    __weak NHMenu *weakSelf=self;
+    [button addAction:[UIAction actionWithHandler:^(__kindof UIAction *action){ [weakSelf activateRow:index]; }] forControlEvents:UIControlEventTouchUpInside];
+    UILongPressGestureRecognizer *hold=[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(rowHeld:)]; hold.minimumPressDuration=0.55; [button addGestureRecognizer:hold];
+    [self.rows addArrangedSubview:button];
+}
+- (void)refreshRows {
+    for(NSUInteger i=0;i<self.items.count;i++) if(i<self.rows.arrangedSubviews.count) {
+        UIButton *button=(UIButton *)self.rows.arrangedSubviews[i]; NSDictionary *item=self.items[i]; NSNumber *ident=item[@"id"]; BOOL selected=self.selection[ident]!=nil;
+        UIColor *color=[self isHeader:item]?[UIColor colorWithWhite:0.82 alpha:1]:(selected?[UIColor colorWithRed:0.18 green:0.32 blue:0.22 alpha:1]:[UIColor colorWithWhite:0.20 alpha:1]);
+        button.backgroundColor=color;
+        [button setAttributedTitle:[self styledTitleForRow:i font:button.titleLabel.font] forState:UIControlStateNormal];
+    }
+    if(self.selectAllButton)[self.selectAllButton setTitle:self.allSelected?@"Clear all":@"Select all" forState:UIControlStateNormal];
+}
+- (void)activateRow:(NSUInteger)index {
+    if(index>=self.items.count)return;
+    self.focusedIndex=index; NSDictionary *item=self.items[index]; NSNumber *ident=item[@"id"];
+    if(self.how==0) { [self accept]; return; }
+    if(![ident longLongValue]) { if(self.how==2 && [self isHeader:item])[self toggleGroupAt:index]; return; }
+    if(self.how==1) {
+        [self.selection removeAllObjects];
+        self.selection[ident]=@(self.keyboardCount>=0?MIN(self.keyboardCount,[self maxCountForItem:item]):-1);
+        [self accept]; return;
+    }
+    NSNumber *current=self.selection[ident];
+    if(self.keyboardCount==0)[self.selection removeObjectForKey:ident];
+    else if(self.keyboardCount>0)self.selection[ident]=@(MIN(self.keyboardCount,[self maxCountForItem:item]));
+    else if(current)[self.selection removeObjectForKey:ident]; else self.selection[ident]=@(-1);
+    self.keyboardCount=-1; self.allSelected=NO; [self refreshRows];
+}
+- (void)toggleGroupAt:(NSUInteger)index {
+    BOOL shouldSelect=NO;
+    for(NSUInteger i=index+1;i<self.items.count && ![self isHeader:self.items[i]];i++) {
+        NSDictionary *item=self.items[i]; if([item[@"id"] longLongValue] && !self.selection[item[@"id"]]){shouldSelect=YES;break;}
+    }
+    for(NSUInteger i=index+1;i<self.items.count && ![self isHeader:self.items[i]];i++) {
+        NSDictionary *item=self.items[i]; NSNumber *ident=item[@"id"];
+        if([ident longLongValue]) { if(shouldSelect)self.selection[ident]=@(-1); else [self.selection removeObjectForKey:ident]; }
+    }
+    self.keyboardCount=-1; self.allSelected=NO; [self refreshRows];
+}
+- (void)selectAll:(BOOL)select {
+    if(select) { for(NSDictionary *item in self.items) if([item[@"id"] longLongValue])self.selection[item[@"id"]]=@(-1); }
+    else [self.selection removeAllObjects];
+    self.allSelected=select; self.keyboardCount=-1; [self refreshRows];
+}
+- (NHBuffer *)resultBuffer {
+    NHBuffer *buffer=[NHBuffer count:self.selection.count*2 size:sizeof(jlong)]; jlong *out=buffer.data.mutableBytes;
+    for(NSDictionary *item in self.items) { NSNumber *value=self.selection[item[@"id"]]; if(value) { *out++=[item[@"id"] longLongValue]; *out++=value.longLongValue; } }
+    return buffer;
+}
+- (void)accept {
+    if(self.how==0) { [self complete:[NHBuffer count:0 size:sizeof(jlong)]]; return; }
+    if(self.how==1) {
+        if(self.focusedIndex<0 || self.focusedIndex>=self.items.count) { [self complete:nil]; return; }
+        NSDictionary *item=self.items[self.focusedIndex]; if(![item[@"id"] longLongValue]) { [self complete:nil]; return; }
+        if(!self.selection[item[@"id"]])self.selection[item[@"id"]]=@(-1);
+    }
+    [self complete:[self resultBuffer]];
+}
+- (void)complete:(id)value {
+    NHGurrOverlay *overlay=self.overlay; self.overlay=nil;
+    void (^callback)(id)=self.finish; self.finish=nil;
+    [overlay dismiss]; if(callback)callback(value);
+}
+- (void)showQuantityForIndex:(NSUInteger)index {
+    if(self.how==0 || index>=self.items.count)return;
+    NSDictionary *item=self.items[index]; NSInteger maximum=[self maxCountForItem:item]; if(maximum<2)return;
+    self.focusedIndex=index;
     NHGurrOverlay *dialog=[[NHGurrOverlay alloc] initWithTitle:@"Quantity"];
     [dialog addMessage:item[@"text"] ?: @""];
-    UITextField *field=[dialog addInputWithInitialText:@"" keyboardType:UIKeyboardTypeNumberPad maxLength:12];
-    field.placeholder=@"All"; __weak NHGurrOverlay *weakDialog=dialog; __weak NHMenu *weakSelf=self;
-    __weak UITextField *weakField=field;
-    void (^select)(void)=^{
-        long long count=weakField.text.longLongValue; if(weakSelf.how==1)[weakSelf.selection removeAllObjects];
-        weakSelf.selection[ident]=count>0?@(count):@(-1); [weakDialog dismiss];
-        if(weakSelf.how==1)[weakSelf done]; else [weakSelf.tableView reloadData];
-    };
-    dialog.onInputReturn=select;
-    dialog.onInputEscape=^{ [weakDialog dismiss]; };
-    ((NHGurrInputField *)field).onEscape=^{ [weakDialog dismiss]; };
+    UILabel *valueLabel=[UILabel new]; valueLabel.textAlignment=NSTextAlignmentCenter; valueLabel.textColor=UIColor.whiteColor; valueLabel.font=[UIFont monospacedSystemFontOfSize:22 weight:UIFontWeightSemibold]; valueLabel.text=[NSString stringWithFormat:@"%ld",(long)maximum];
+    UISlider *slider=[UISlider new]; slider.minimumValue=1; slider.maximumValue=maximum; slider.value=maximum;
+    [slider addAction:[UIAction actionWithHandler:^(__kindof UIAction *action){ NSInteger n=MAX(1,lroundf(slider.value)); slider.value=n; valueLabel.text=[NSString stringWithFormat:@"%ld",(long)n]; }] forControlEvents:UIControlEventValueChanged];
+    UIStackView *controls=[[UIStackView alloc] initWithArrangedSubviews:@[valueLabel,slider]]; controls.axis=UILayoutConstraintAxisVertical; controls.spacing=10;
+    [dialog addCustomView:controls height:86]; __weak NHGurrOverlay *weakDialog=dialog; __weak NHMenu *weakSelf=self;
     [dialog addActionWithTitle:@"Cancel" primary:NO handler:^{ [weakDialog dismiss]; }];
-    [dialog addActionWithTitle:@"Select" primary:YES handler:select];
-    [dialog presentInView:self.view focusInput:YES];
+    [dialog addActionWithTitle:@"Select" primary:YES handler:^{
+        NSInteger count=MAX(1,lroundf(slider.value));
+        if(weakSelf.how==1) { [weakSelf.selection removeAllObjects]; weakSelf.selection[item[@"id"]]=@(count); [weakSelf accept]; [weakDialog dismiss]; }
+        else { weakSelf.selection[item[@"id"]]=@(count>=maximum?-1:count); [weakSelf refreshRows]; [weakDialog dismiss]; }
+    }];
+    dialog.hardwareKeyHandler=^BOOL(unichar key){ if(key==27){[weakDialog dismiss];return YES;} return NO; };
+    [dialog presentInView:self.overlay focusInput:NO];
 }
-- (void)done {
-    NHBuffer *b=[NHBuffer count:self.selection.count*2 size:sizeof(jlong)]; jlong *p=b.data.mutableBytes;
-    // Preserve original menu order, including preselected entries.
-    for(NSDictionary *item in self.items) if(self.selection[item[@"id"]]) { *p++=[item[@"id"] longLongValue]; *p++=[self.selection[item[@"id"]] longLongValue]; }
-    [self complete:b];
+- (void)rowHeld:(UILongPressGestureRecognizer *)press {
+    if(press.state!=UIGestureRecognizerStateBegan)return;
+    NSUInteger index=press.view.tag-10000; if(index<self.items.count)[self showQuantityForIndex:index];
 }
-- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s { return self.items.count; }
-- (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)p {
-    UITableViewCell *c=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
-    NSDictionary *item=self.items[p.row]; c.textLabel.text=item[@"text"]; c.textLabel.numberOfLines=0;
-    c.textLabel.font=[UIFont monospacedSystemFontOfSize:15 weight:UIFontWeightRegular];
-    c.accessoryType=self.selection[item[@"id"]] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-    c.selectionStyle=[item[@"id"] longLongValue] && self.how ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
-    return c;
-}
-- (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)p {
-    NSDictionary *item=self.items[p.row]; NSNumber *ident=item[@"id"];
-    if(!self.how || !ident.longLongValue)return;
-    if(self.how==1) { [self.selection removeAllObjects]; self.selection[ident]=@(-1); [self done]; }
-    else { if(self.selection[ident]) [self.selection removeObjectForKey:ident]; else self.selection[ident]=@(-1); [t reloadData]; }
+- (BOOL)handleKey:(unichar)key {
+    if(key==27) { [self complete:nil]; return YES; }
+    if(key==13||key==10||key==' ') {
+        if(self.how==2 && self.focusedIndex>=0 && self.focusedIndex<self.items.count)[self activateRow:self.focusedIndex]; else [self accept];
+        return YES;
+    }
+    if(key>='0'&&key<='9'&&self.how) { self.keyboardCount=MAX(0,self.keyboardCount)*10+key-'0'; return YES; }
+    for(NSUInteger i=0;i<self.accelerators.count;i++) if([self.accelerators[i] unsignedShortValue]==key && [self.items[i][@"id"] longLongValue]) {
+        [self activateRow:i]; return YES;
+    }
+    BOOL changed=NO;
+    for(NSDictionary *item in self.items) if(self.how==2 && [item[@"group"] intValue]==key && [item[@"id"] longLongValue]) {
+        NSNumber *ident=item[@"id"]; if(self.selection[ident])[self.selection removeObjectForKey:ident]; else self.selection[ident]=@(-1); changed=YES;
+    }
+    if(changed) { self.allSelected=NO; [self refreshRows]; return YES; }
+    if(self.how==2 && key=='.') { [self selectAll:YES]; return YES; }
+    if(self.how==2 && key=='-') { [self selectAll:NO]; return YES; }
+    return NO;
 }
 @end
-
-@interface NHGame : UIViewController <UIScrollViewDelegate,UITextFieldDelegate>
+@interface NHGame : UIViewController <UITextFieldDelegate,UIGestureRecognizerDelegate>
 @property NHMap *map;
-@property UIScrollView *scroll;
 @property UITextView *messages;
 @property UILabel *status;
 @property UITextField *keyboard;
@@ -125,6 +351,7 @@ static UIColor *NHColor(int rgb) {
 @property NSString *keyboardMode;
 @property BOOL shift, lastLandscape, waitingKey;
 @property NSInteger uiSmokeTurns;
+@property CGFloat lastPinchScale;
 @property BOOL modalControlsHidden, modalKeyboardPanelWasHidden, modalDpadWasHidden, modalMoreButtonWasHidden;
 @property NSMutableArray<NSNumber *> *modalPanelHiddenStates;
 
@@ -139,8 +366,6 @@ static UIColor *NHColor(int rgb) {
 static NHGame *game;
 @implementation NHGame
 #include "GurrFrontend.inc"
-- (UIView *)viewForZoomingInScrollView:(UIScrollView *)scroll { return self.map; }
-- (void)scrollViewWillBeginDragging:(UIScrollView *)scroll { self.panned=YES; }
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated]; if(self.started)return; self.started=YES;
     NSURL *docs=[NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
@@ -164,13 +389,27 @@ static NHGame *game;
 - (void)enqueue:(NSArray *)event { [self.inputCondition lock]; if(!self.ended && self.input.count<512) [self.input addObject:event]; [self.inputCondition signal]; [self.inputCondition unlock]; }
 - (BOOL)textField:(UITextField *)f shouldChangeCharactersInRange:(NSRange)r replacementString:(NSString *)s { for(NSUInteger i=0;i<s.length;i++) [self enqueue:@[@([s characterAtIndex:i])]]; return NO; }
 - (BOOL)textFieldShouldReturn:(UITextField *)f { [self enqueue:@[@13]]; [f resignFirstResponder]; return NO; }
-- (void)mapTap:(UITapGestureRecognizer *)tap { CGPoint p=[tap locationInView:self.map]; [self touch:p longPress:NO]; }
+- (void)mapTap:(UITapGestureRecognizer *)tap { [self touch:[tap locationInView:self.map] longPress:NO]; }
 - (void)mapHold:(UILongPressGestureRecognizer *)hold { if(hold.state==UIGestureRecognizerStateBegan)[self touch:[hold locationInView:self.map] longPress:YES]; }
+- (void)mapPan:(UIPanGestureRecognizer *)pan {
+    if(pan.state==UIGestureRecognizerStateChanged || pan.state==UIGestureRecognizerStateBegan) {
+        CGPoint delta=[pan translationInView:self.map];
+        BOOL afterPan=[NHPref(@"travel",@1) intValue]==1;
+        if([self.map panBy:delta allowWhenLocked:afterPan])self.panned=YES;
+        [pan setTranslation:CGPointZero inView:self.map];
+    }
+}
+- (void)mapPinch:(UIPinchGestureRecognizer *)pinch {
+    if(pinch.state==UIGestureRecognizerStateBegan) { self.lastPinchScale=1; self.panned=NO; }
+    else if(pinch.state==UIGestureRecognizerStateChanged) {
+        CGFloat factor=pinch.scale/MAX(0.001,self.lastPinchScale); self.lastPinchScale=pinch.scale;
+        if([self.map zoomByFactor:factor aroundPoint:[pinch locationInView:self.map]])NHSetPref(@"mapScale",@(self.map.scale));
+    }
+}
 - (void)touch:(CGPoint)p longPress:(BOOL)hold {
-    int x=(int)(p.x/24),y=(int)(p.y/24); if(x<1||x>=80||y<0||y>=21)return;
-    CGFloat dx=p.x-(self.player.x+0.5)*24,dy=p.y-(self.player.y+0.5)*24;
-    CGFloat z=self.scroll.zoomScale;
-    BOOL onSelf=(x==(int)self.player.x && y==(int)self.player.y) || (dx*dx+dy*dy)*z*z<25*25;
+    CGPoint tile=[self.map tileAtViewPoint:p]; int x=(int)tile.x,y=(int)tile.y; if(x<0||x>=80||y<0||y>=21)return;
+    CGPoint playerCenter=[self.map centerForTile:self.player]; CGFloat dx=p.x-playerCenter.x,dy=p.y-playerCenter.y;
+    BOOL onSelf=(x==(int)self.player.x && y==(int)self.player.y) || dx*dx+dy*dy<25*25;
     int travelMode=[NHPref(@"travel",@1) intValue];
     BOOL travel=travelMode==2 || (travelMode==1 && self.panned && (abs(x-(int)self.player.x)>3 || abs(y-(int)self.player.y)>3));
     if(self.waitingKey && !self.expectsDirection && !self.mouseLocked) { [self enqueue:@[@32]]; return; }
@@ -339,11 +578,12 @@ static NHGame *game;
 - (id)menu:(NSNumber *)wid how:(int)how {
     dispatch_semaphore_t ready=dispatch_semaphore_create(0); __block id result=nil;
     dispatch_async(dispatch_get_main_queue(),^{
-        [self.keyboard resignFirstResponder]; NSMutableDictionary *w=self.windows[wid];
+        NSMutableDictionary *w=self.windows[wid];
+        NHGurrOverlay *overlay=[self beginGameOverlay:w[@"title"] ?: @"NetHack"];
         NHMenu *menu=[NHMenu new]; menu.how=how; menu.title=w[@"title"] ?: @"NetHack"; menu.items=[w[@"items"] copy];
         menu.finish=^(id value){result=value; dispatch_semaphore_signal(ready);};
-        UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:menu]; nav.modalPresentationStyle=UIModalPresentationFullScreen; nav.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;
-        [self presentViewController:nav animated:YES completion:nil];
+        menu.overlay=overlay; menu.tileImage=self.map.tiles; menu.tileSize=self.map.tileSize;
+        [menu presentInView:self.view];
     }); dispatch_semaphore_wait(ready,DISPATCH_TIME_FOREVER); return result;
 }
 - (id)invoke:(NSString *)name arguments:(NSArray *)a {
@@ -452,8 +692,11 @@ static NHGame *game;
         }
         else if([name isEqual:@"printTile"]) { int x=[a[1] intValue],y=[a[2] intValue]; self.map.cells[@(y*80+x)]=@[a[3],a[4],a[5],a[6]]; [self.map setNeedsDisplay]; }
         else if([name isEqual:@"setCursorPos"]) { NSMutableDictionary *w=self.windows[a[0]]; if([w[@"type"] intValue]==2) { NSInteger row=MAX(0,MIN(1,[a[2] integerValue])); w[@"statusRow"]=@(row); if(!w[@"statusLines"])w[@"statusLines"]=[NSMutableArray arrayWithObjects:[NSMutableAttributedString new],[NSMutableAttributedString new],nil]; w[@"statusLines"][row]=[NSMutableAttributedString new]; } if([self.windows[a[0]][@"type"] intValue]==3) { self.map.cursor=CGPointMake([a[1] intValue],[a[2] intValue]); [self.map setNeedsDisplay]; } }
-        else if([name isEqual:@"cliparound"]) { self.player=CGPointMake([a[2] floatValue],[a[3] floatValue]); CGFloat z=self.scroll.zoomScale; CGPoint p=CGPointMake([a[0] floatValue]*24*z-self.scroll.bounds.size.width/2,[a[1] floatValue]*24*z-self.scroll.bounds.size.height/2); p.x=MAX(0,MIN(p.x,self.scroll.contentSize.width-self.scroll.bounds.size.width)); p.y=MAX(0,MIN(p.y,self.scroll.contentSize.height-self.scroll.bounds.size.height)); if([NHPref(@"lockView",@YES) boolValue]) { if(self.scroll.contentSize.width<=self.scroll.bounds.size.width)p.x=0; if(self.scroll.contentSize.height<=self.scroll.bounds.size.height)p.y=0; } [self.scroll setContentOffset:p animated:NO]; }
-        else if([name isEqual:@"addMenu"]) [self.windows[a[0]][@"items"] addObject:@{@"id":a[2],@"text":NHText(a[6]),@"selected":a[7]}];
+        else if([name isEqual:@"cliparound"]) { self.player=CGPointMake([a[2] floatValue],[a[3] floatValue]); [self.map centerOnTile:CGPointMake([a[0] floatValue],[a[1] floatValue]) lockView:[NHPref(@"lockView",@YES) boolValue]]; }
+        else if([name isEqual:@"addMenu"]) {
+            id color=(a.count>8 && a[8]!=NSNull.null)?a[8]:@0;
+            [self.windows[a[0]][@"items"] addObject:@{@"tile":a[1],@"id":a[2],@"acc":a[3],@"group":a[4],@"attr":a[5],@"text":NHText(a[6]),@"selected":a[7],@"color":color}];
+        }
         else if([name isEqual:@"endMenu"]) self.windows[a[0]][@"title"]=NHText(a[1]);
         else if([name isEqual:@"setNumPadOption"]) { self.numpad=[a[0] boolValue]; [self applyPreferences]; }
         else if([name isEqual:@"askDirection"]) { self.expectsDirection=YES; [self updateDirectionOverlay]; }

@@ -8,7 +8,7 @@ The **iOS game build** workflow compiles the game on macOS and creates `NetHack-
 
 On a Mac with Xcode: `bash sys/ios/build.sh game`. Run `python3 sys/ios/simulate.py` afterward to launch the UIKit app in an available iPhone simulator and capture its game screen. The original Swift installation probe remains available through `bash sys/ios/build.sh` and the separate manual workflow.
 
-## Gurr interface revision (0.3.0)
+## Gurr interface revision (0.4.0)
 
 See [GURR-UI.md](GURR-UI.md) for pinned source references, implemented controls, attribution and remaining differences. This revision replaces the provisional fixed button grid with the Gurr command panels and keyboard. The NetHack 5.0.0 engine is retained.
 
@@ -17,7 +17,9 @@ See [GURR-UI.md](GURR-UI.md) for pinned source references, implemented controls,
 - Real NetHack 5.0.0 C engine, Lua 5.4.8, generated game data, and original default tiles.
 - Reuse of the Android C window port through an in-process compatibility adapter. There is no Java VM in the app.
 - Background engine thread; UIKit map, messages, status, menus, name/text prompts, and input queue.
-- Eight-direction buttons, basic command buttons, keyboard input, pan/pinch, map targeting, directional tap and long-press travel.
+- Gurr-style overlays for text prompts, yes/no questions, inventory menus, pickup and multi-item selection, item quantities, and long text windows.
+- Eight-direction buttons, basic command buttons, keyboard input, free map dragging, focus-preserving pinch zoom, map targeting, directional tap and long-press travel.
+- The Gurr Android NetHack app icon, compiled into the iOS app bundle.
 - Save-and-exit command; restoring by entering the same character name after relaunch.
 - Writable data under Documents/NetHack, visible through Files. Backgrounding requests a save on the engine thread within an iOS background task. iOS can interrupt this; use Save explicitly before ending a session.
 
@@ -25,7 +27,7 @@ See [GURR-UI.md](GURR-UI.md) for pinned source references, implemented controls,
 
 CI runs the actual engine and adapter as a native macOS executable in a temporary playground: start a game, render glyphs, process four turns, save, start a fresh process, restore, process four more turns, and save again. It requires a nonempty save file and a restoration message. This passed in game build #3.
 
-The additional simulator check launches the actual UIKit binary using a dedicated test character and waits for a rendered map at the engine's gameplay input boundary. It does not replace physical-device touch testing or exercise the interactive character-selection dialogs.
+The additional simulator check launches the actual UIKit binary using a dedicated test character, captures the map and modal screens, checks prompt and question responses, exercises grouped item-menu selection, verifies map pan/pinch math, and confirms the icon asset is bundled. It does not replace physical-device touch testing or extended play.
 
 ## Remaining differences
 

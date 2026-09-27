@@ -4,6 +4,7 @@ import concurrent.futures
 import json
 import os
 import platform
+import plistlib
 import re
 import shutil
 import subprocess
@@ -35,6 +36,9 @@ for name in ("Bridge.m","GameApp.m"):
     compiled.append(obj)
 app=out/"Simulator/NetHack.app"
 shutil.copytree(out/"Payload/NetHack.app",app,dirs_exist_ok=True)
+app_info=plistlib.loads((app/"Info.plist").read_bytes())
+if app_info.get("CFBundleIconName")!="AppIcon" or not (app/"Assets.car").is_file():
+    raise RuntimeError("The Gurr NetHack app icon was not included in the iOS bundle")
 run("xcrun","clang",*target,*compiled,"-framework","UIKit","-framework","Foundation","-o",app/"NetHack")
 run("codesign","--force","--sign","-",app)
 available=json.loads(run("xcrun","simctl","list","devices","available","--json"))["devices"]
@@ -46,7 +50,7 @@ if device["state"]!="Booted":run("xcrun","simctl","boot",udid)
 run("xcrun","simctl","bootstatus",udid,"-b")
 run("xcrun","simctl","install",udid,app)
 container=Path(run("xcrun","simctl","get_app_container",udid,"org.nethack.personal.ios","data"))
-screens=(("UI_READY","ios-game-screen.png"),("UI_KEYBOARD","ios-keyboard-screen.png"),("UI_SETTINGS","ios-settings-screen.png"),("UI_PROMPT","ios-prompt-screen.png"),("UI_PROMPT_CANCEL","ios-prompt-cancel-screen.png"),("UI_QUESTION","ios-question-screen.png"),("UI_DIALOG","ios-dialog-screen.png"),("UI_MODAL_RESTORED","ios-modal-restored-screen.png"))
+screens=(("UI_READY","ios-game-screen.png"),("UI_KEYBOARD","ios-keyboard-screen.png"),("UI_SETTINGS","ios-settings-screen.png"),("UI_PROMPT","ios-prompt-screen.png"),("UI_PROMPT_CANCEL","ios-prompt-cancel-screen.png"),("UI_QUESTION","ios-question-screen.png"),("UI_DIALOG","ios-dialog-screen.png"),("UI_MODAL_RESTORED","ios-modal-restored-screen.png"),("UI_MAP_GESTURES","ios-map-gestures-screen.png"),("UI_ITEM_MENU","ios-item-menu-screen.png"),("UI_MENU_SELECTION","ios-menu-selection-screen.png"))
 for marker,_ in screens:
     (container/"Documents"/marker).unlink(missing_ok=True)
 run("xcrun","simctl","launch",udid,"org.nethack.personal.ios","--ui-smoke")
@@ -59,4 +63,4 @@ for marker,filename in screens:
     run("xcrun","simctl","io",udid,"screenshot",out/filename)
     if not ready.exists():raise RuntimeError(f"UIKit check did not finish: {marker}")
     print(f"PASS: {marker}",flush=True)
-print("PASS: map, Gurr keyboard, prompt input/cancel, question keys, dialog, settings and control restoration",flush=True)
+print("PASS: Gurr map pan/pinch, inventory/item menu selection, app icon, keyboard, prompts, dialogs, settings and control restoration",flush=True)

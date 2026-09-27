@@ -10,8 +10,7 @@
     [super viewDidLoad]; self.view.backgroundColor=UIColor.blackColor; self.overrideUserInterfaceStyle=UIUserInterfaceStyleDark;
     self.windows=[NSMutableDictionary new]; self.inputCondition=[NSCondition new]; self.input=[NSMutableArray new]; self.backgroundTask=UIBackgroundTaskInvalid;
     self.panels=[NSMutableArray new]; self.panelDefinitions=[NSMutableArray new]; self.history=[NSMutableArray new];
-    self.map=[NHMap new]; self.scroll=[UIScrollView new]; self.scroll.delegate=self; self.scroll.minimumZoomScale=0.2; self.scroll.maximumZoomScale=4;
-    self.scroll.contentSize=self.map.bounds.size; [self.scroll addSubview:self.map]; [self.view addSubview:self.scroll];
+    self.map=[NHMap new]; self.map.scale=MIN(4,MAX(0.2,[NHPref(@"mapScale",@1) floatValue])); [self.view addSubview:self.map];
     self.status=[UILabel new]; self.status.numberOfLines=2; self.status.textColor=UIColor.whiteColor; self.status.userInteractionEnabled=YES;
     self.status.font=[UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular]; [self.view addSubview:self.status];
     self.messages=[UITextView new]; self.messages.editable=NO; self.messages.selectable=NO; self.messages.backgroundColor=UIColor.clearColor; self.messages.textColor=UIColor.whiteColor;
@@ -20,7 +19,10 @@
     UILongPressGestureRecognizer *history=[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(historyHold:)]; [self.messages addGestureRecognizer:history];
     [self.status addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(showMenu)]];
     UITapGestureRecognizer *tap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(mapTap:)]; [self.map addGestureRecognizer:tap];
-    UILongPressGestureRecognizer *hold=[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(mapHold:)]; [self.map addGestureRecognizer:hold]; [tap requireGestureRecognizerToFail:hold];
+    UILongPressGestureRecognizer *hold=[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(mapHold:)]; hold.minimumPressDuration=0.5; [self.map addGestureRecognizer:hold];
+    UIPanGestureRecognizer *pan=[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(mapPan:)]; pan.minimumNumberOfTouches=1; pan.maximumNumberOfTouches=1; [self.map addGestureRecognizer:pan];
+    UIPinchGestureRecognizer *pinch=[[UIPinchGestureRecognizer alloc] initWithTarget:self action:@selector(mapPinch:)]; [self.map addGestureRecognizer:pinch];
+    [tap requireGestureRecognizerToFail:hold]; [tap requireGestureRecognizerToFail:pan];
     self.keyboard=[UITextField new]; self.keyboard.delegate=self; // Text prompts use the system keyboard; game commands use ForkFront keys.
     self.keyboardPanel=[UIView new]; self.keyboardPanel.backgroundColor=UIColor.blackColor; self.keyboardPanel.hidden=YES; [self.view addSubview:self.keyboardPanel];
     self.dpad=[UIView new]; [self.view addSubview:self.dpad];
@@ -79,7 +81,9 @@
     CGFloat mh=self.messages.text.length?MIN(90,MAX(22,[self.messages sizeThatFits:CGSizeMake(width,CGFLOAT_MAX)].height)):0;
     self.messages.frame=CGRectMake(area.origin.x,area.origin.y+34,width,mh);
     // The map occupies the available play area; messages/status overlay it as in ForkFront.
-    self.scroll.frame=area;
+    BOOL mapSizeChanged=!CGSizeEqualToSize(self.map.frame.size,area.size);
+    self.map.frame=area;
+    if(mapSizeChanged)[self.map centerOnTile:self.player lockView:[NHPref(@"lockView",@YES) boolValue]];
     for(NSMutableDictionary *w in self.windows.allValues)if([w[@"type"] intValue]==2)[self updateStatus:w];
     int loc=[NHPref(landscape?@"ovlLandLoc":@"ovlPortLoc",@1) intValue]; CGSize ds=self.dpad.bounds.size;
     CGFloat dx=loc%3==0?area.origin.x:loc%3==1?CGRectGetMidX(area)-ds.width/2:CGRectGetMaxX(area)-ds.width;
@@ -183,9 +187,53 @@
 - (void)messageTap { if(self.waitingKey)[self enqueue:@[@32]]; else [self showHistory]; }
 - (void)showHistory {
     if(self.presentedViewController)return;
-    NHMenu *m=[NHMenu new]; m.title=@"Message history"; NSMutableArray *items=[NSMutableArray new];
+    NHGurrOverlay *overlay=[self beginGameOverlay:@"Message history"];
+    NHMenu *m=[NHMenu new]; m.title=@"Message history"; m.overlay=overlay; NSMutableArray *items=[NSMutableArray new];
     for(NSString *s in self.history)[items addObject:@{@"id":@0,@"text":s}]; m.items=items; m.how=0;
-    UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:m]; nav.overrideUserInterfaceStyle=UIUserInterfaceStyleDark; [self presentViewController:nav animated:YES completion:nil];
+    [m presentInView:self.view];
+}
+- (void)runMenuUISmokeSequence {
+    CGPoint oldOrigin=self.map.origin, anchor=CGPointMake(CGRectGetMidX(self.map.bounds),CGRectGetMidY(self.map.bounds)); CGFloat oldScale=self.map.scale;
+    BOOL panned=[self.map panBy:CGPointMake(0,24) allowWhenLocked:YES];
+    NSCAssert(panned && fabs(self.map.origin.y-oldOrigin.y-24)<0.1,@"Map could not pan along a fitting axis");
+    CGPoint beforeTile=[self.map tileAtViewPoint:anchor];
+    BOOL pinched=[self.map zoomByFactor:1.1 aroundPoint:anchor]; CGPoint afterTile=[self.map tileAtViewPoint:anchor];
+    NSCAssert(pinched && fabs(beforeTile.x-afterTile.x)<0.01 && fabs(beforeTile.y-afterTile.y)<0.01,@"Map pinch did not preserve its focus point");
+    BOOL hasPan=NO,hasPinch=NO; for(UIGestureRecognizer *gesture in self.map.gestureRecognizers) { hasPan|=[gesture isKindOfClass:UIPanGestureRecognizer.class]; hasPinch|=[gesture isKindOfClass:UIPinchGestureRecognizer.class]; }
+    NSCAssert(hasPan && hasPinch,@"Gurr map drag/pinch gestures are missing");
+    self.map.origin=oldOrigin; self.map.scale=oldScale; [self.map setNeedsDisplay];
+    [self writeUIReady:@"UI_MAP_GESTURES"];
+    NHMenu *single=[NHMenu new]; single.how=1; single.selection=[NSMutableDictionary new]; single.items=@[@{@"id":@9003,@"text":@"2 darts",@"acc":@100}]; __block id singleResult=nil;
+    single.finish=^(id value){singleResult=value;}; single.keyboardCount=1; [single activateRow:0];
+    NSCAssert([singleResult isKindOfClass:NHBuffer.class] && ((NHBuffer *)singleResult).data.length==2*sizeof(jlong),@"PickOne did not return one item/count pair");
+    jlong *singlePair=((NHBuffer *)singleResult).data.mutableBytes;
+    NSCAssert(singlePair[0]==9003 && singlePair[1]==1,@"PickOne did not preserve the requested quantity");
+    NHMenu *none=[NHMenu new]; none.how=0; none.items=@[@{@"id":@0,@"text":@"History line"}]; __block id noneResult=nil;
+    none.finish=^(id value){noneResult=value;}; [none activateRow:0];
+    NSCAssert([noneResult isKindOfClass:NHBuffer.class] && ((NHBuffer *)noneResult).data.length==0,@"PickNone did not return an empty selection");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        NHMenu *menu=[NHMenu new]; menu.how=2; menu.title=@"Pick up what?"; menu.tileImage=self.map.tiles; menu.tileSize=self.map.tileSize;
+        menu.items=@[
+            @{@"tile":@(-1),@"id":@0,@"acc":@0,@"group":@0,@"attr":@2,@"text":@"Items on the floor",@"selected":@NO,@"color":@0},
+            @{@"tile":@(-1),@"id":@9001,@"acc":@97,@"group":@119,@"attr":@0,@"text":@"2 arrows",@"selected":@NO,@"color":@0},
+            @{@"tile":@(-1),@"id":@9002,@"acc":@98,@"group":@119,@"attr":@0,@"text":@"dagger",@"selected":@NO,@"color":@0}
+        ];
+        menu.overlay=[self beginGameOverlay:menu.title]; __weak NHGame *weakSelf=self; __weak NHMenu *weakMenu=menu;
+        menu.finish=^(id value){
+            NSCAssert([value isKindOfClass:NHBuffer.class],@"Pick up menu did not return item selections");
+            NHBuffer *buffer=value; NSCAssert(buffer.data.length==2*sizeof(jlong),@"Pick up menu returned the wrong number of items");
+            jlong *selected=buffer.data.mutableBytes; NSCAssert(selected[0]==9001 && selected[1]==2,@"Pick up menu selection did not preserve the chosen item quantity");
+            [weakSelf writeUIReady:@"UI_MENU_SELECTION"];
+        };
+        [menu presentInView:self.view];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{ [weakSelf writeUIReady:@"UI_ITEM_MENU"]; });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+            [(UIButton *)[weakMenu.overlay viewWithTag:10000] sendActionsForControlEvents:UIControlEventTouchUpInside];
+            weakMenu.overlay.hardwareKeyHandler('2'); weakMenu.overlay.hardwareKeyHandler('a');
+            [(UIButton *)[weakMenu.overlay viewWithTag:10002] sendActionsForControlEvents:UIControlEventTouchUpInside];
+            [(UIButton *)[weakMenu.overlay viewWithTag:1001] sendActionsForControlEvents:UIControlEventTouchUpInside];
+        });
+    });
 }
 - (void)runModalUISmokeSequence {
     BOOL keyboardWasHidden=self.keyboardPanel.hidden, dpadWasHidden=self.dpad.hidden, moreWasHidden=self.moreButton.hidden;
@@ -207,6 +255,7 @@
                     NSCAssert(weakSelf.keyboardPanel.hidden==keyboardWasHidden && weakSelf.dpad.hidden==dpadWasHidden && weakSelf.moreButton.hidden==moreWasHidden,@"Game controls were not restored after the dialog");
                     for(NSUInteger i=0;i<MIN(weakSelf.panels.count,panelStates.count);i++) NSCAssert(weakSelf.panels[i].hidden==[panelStates[i] boolValue],@"Command panel visibility changed after a dialog");
                     [weakSelf writeUIReady:@"UI_MODAL_RESTORED"];
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{ [weakSelf runMenuUISmokeSequence]; });
                 }];
                 [dialog presentInView:weakSelf.view focusInput:NO];
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [weakSelf writeUIReady:@"UI_DIALOG"]; });

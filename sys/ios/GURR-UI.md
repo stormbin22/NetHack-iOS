@@ -14,8 +14,15 @@ It adopts the original default command order, six configurable edge panels with
 orientation-specific visibility/location, panel size/opacity, command labels and
 control/meta sequences, the four keyboard maps, top status/message overlay,
 directional overlay, travel mode choices, map pan/pinch and long-press running.
-Long-press a menu item to select a quantity. Tap messages for history, or the
-status line for the app menu. Long-press a command panel to open settings.
+Text prompts, response questions, inventory and item-selection menus, quantities,
+and text windows use the same Gurr-style in-game overlay. Menus retain item and
+group shortcuts, selected counts, group toggles, select-all/clear-all, and the
+PickNone/PickOne/PickMany return behavior. Long-press a stack to choose a
+quantity. Map dragging is handled by the game canvas on both axes even when its
+content fits the viewport; pinching preserves the tile under the gesture center.
+Tap messages for history, or the status line for the app menu. Long-press a
+command panel to open settings. The app icon is based on the Android icon bundled
+with the Gurr NetHack source.
 
 The supplied keyboard JSON is transcribed from ForkFront's qwerty.xml,
 symbols.xml, ctrl.xml and meta.xml. Their notice is retained here:
@@ -30,9 +37,9 @@ under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
 CONDITIONS OF ANY KIND, either express or implied. See the License for the
 specific language governing permissions and limitations under the License.
 
-Differences that remain: UIKit menu/dialog appearance, no Android hardware
-Back/volume bindings, Hearse, arbitrary external tileset import, per-command
-drag/reorder, or options-file editor. Tiles are the updated 5.0.0 Default,
+Differences that remain: UIKit appearance and the native iOS text keyboard, no
+Android hardware Back/volume bindings, Hearse, arbitrary external tileset
+import, per-command drag/reorder, or options-file editor. Tiles are the updated 5.0.0 Default,
 Geoduck and Nevanda assets; old 3.6.6 tile indices must not be used with 5.0.0.
 The iPhone keyboard adds an Esc/Space/Hide strip to replace Android Back.
 Save ends the engine session; close and reopen the app to resume the same name.
