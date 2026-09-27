@@ -5,6 +5,9 @@ if [[ "$(uname -s)" != Darwin ]]; then
   echo 'This build requires macOS with Xcode.' >&2
   exit 1
 fi
+if [[ "${1:-}" == "game" ]]; then
+  exec python3 sys/ios/build.py
+fi
 output="$(mktemp -d "${TMPDIR:-/tmp}/nethack-ios.XXXXXX")"
 app="$output/Payload/NetHack.app"
 mkdir -p "$app" build/ios
