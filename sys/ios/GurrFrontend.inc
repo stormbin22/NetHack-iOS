@@ -227,7 +227,7 @@
         };
         [menu presentInView:self.view];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{ [weakSelf writeUIReady:@"UI_ITEM_MENU"]; });
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,8*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,12*NSEC_PER_SEC),dispatch_get_main_queue(),^{
             [(UIButton *)[menu.overlay viewWithTag:10000] sendActionsForControlEvents:UIControlEventTouchUpInside];
             menu.overlay.hardwareKeyHandler('2'); menu.overlay.hardwareKeyHandler('a');
             [(UIButton *)[menu.overlay viewWithTag:10002] sendActionsForControlEvents:UIControlEventTouchUpInside];
@@ -243,7 +243,6 @@
         NSCAssert(!cancelled && [value isEqual:@"Goblin"],@"Prompt input was not returned");
         NHGurrOverlay *cancelPrompt=[weakSelf showLinePrompt:@"Prompt cancellation" initial:@"keep me" history:@[@"keep me"] maxLength:40 focusInput:NO completion:^(NSString *cancelValue,BOOL wasCancelled){
             NSCAssert(wasCancelled && [cancelValue isEqual:@"\033"],@"Prompt cancellation did not return Escape");
-            [weakSelf writeUIReady:@"UI_PROMPT_CANCEL"];
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1.5*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
             NHGurrOverlay *question=[weakSelf showQuestion:@"Really leave this test?" choices:@"yn" defaultKey:'y' completion:^(int key){
                 NSCAssert(key=='n',@"Question did not return the selected response key");
@@ -259,16 +258,17 @@
                 }];
                 [dialog presentInView:weakSelf.view focusInput:NO];
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [weakSelf writeUIReady:@"UI_DIALOG"]; });
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [(UIButton *)[dialog viewWithTag:1000] sendActionsForControlEvents:UIControlEventTouchUpInside]; });
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(8*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [(UIButton *)[dialog viewWithTag:1000] sendActionsForControlEvents:UIControlEventTouchUpInside]; });
             }];
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [weakSelf writeUIReady:@"UI_QUESTION"]; });
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [(UIButton *)[question viewWithTag:2001] sendActionsForControlEvents:UIControlEventTouchUpInside]; });
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(8*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [(UIButton *)[question viewWithTag:2001] sendActionsForControlEvents:UIControlEventTouchUpInside]; });
             });
         }];
-        if(cancelPrompt.onInputEscape)cancelPrompt.onInputEscape();
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [weakSelf writeUIReady:@"UI_PROMPT_CANCEL"]; });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(8*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ if(cancelPrompt.onInputEscape)cancelPrompt.onInputEscape(); });
     }];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [weakSelf writeUIReady:@"UI_PROMPT"]; });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ prompt.inputField.text=@"Goblin"; if(prompt.onInputReturn)prompt.onInputReturn(); });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(8*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ prompt.inputField.text=@"Goblin"; if(prompt.onInputReturn)prompt.onInputReturn(); });
 }
 - (void)updateStatus:(NSMutableDictionary *)window {
     NSArray *lines=window[@"statusLines"]; if(!lines)return;
