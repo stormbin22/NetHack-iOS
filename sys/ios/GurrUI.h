@@ -181,8 +181,9 @@ static NSArray<NSNumber *> *NHCommandKeys(NSString *command) {
         UIButton *entry=[self styledButton:value primary:NO]; entry.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeft;
         entry.titleLabel.lineBreakMode=NSLineBreakByTruncatingTail; NSString *item=[value copy];
         [entry addAction:[UIAction actionWithHandler:^(__kindof UIAction *action){
-            weakSelf.inputField.text=item; [weakSelf.inputField selectAll:nil];
-            weakSelf->_historyScroll.hidden=YES; weakSelf->_historyHeight.constant=0; if(select)select(item);
+            NHGurrOverlay *strongSelf=weakSelf; if(!strongSelf)return;
+            strongSelf.inputField.text=item; [strongSelf.inputField selectAll:nil];
+            strongSelf->_historyScroll.hidden=YES; strongSelf->_historyHeight.constant=0; if(select)select(item);
         }] forControlEvents:UIControlEventTouchUpInside];
         [list addArrangedSubview:entry];
     }
@@ -196,9 +197,10 @@ static NSArray<NSNumber *> *NHCommandKeys(NSString *command) {
     ]];
     [self insertContent:_historyScroll];
     [toggle addAction:[UIAction actionWithHandler:^(__kindof UIAction *action){
-        weakSelf->_historyScroll.hidden=!weakSelf->_historyScroll.hidden;
-        weakSelf->_historyHeight.constant=weakSelf->_historyScroll.hidden?0:MIN(160,items.count*47.0);
-        [weakSelf layoutIfNeeded];
+        NHGurrOverlay *strongSelf=weakSelf; if(!strongSelf)return;
+        strongSelf->_historyScroll.hidden=!strongSelf->_historyScroll.hidden;
+        strongSelf->_historyHeight.constant=strongSelf->_historyScroll.hidden?0:MIN(160,items.count*47.0);
+        [strongSelf layoutIfNeeded];
     }] forControlEvents:UIControlEventTouchUpInside];
 }
 - (void)addTextView:(NSString *)text height:(CGFloat)height {
