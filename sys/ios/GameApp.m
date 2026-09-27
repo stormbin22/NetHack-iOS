@@ -105,7 +105,7 @@ static NHGame *game;
     [NSLayoutConstraint activateConstraints:@[[stack.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor], [stack.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor], [stack.topAnchor constraintEqualToAnchor:safe.topAnchor], [stack.bottomAnchor constraintEqualToAnchor:self.view.keyboardLayoutGuide.topAnchor]]];
     self.messages=[UITextView new]; self.messages.editable=NO; self.messages.font=[UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
     [self.messages.heightAnchor constraintEqualToConstant:88].active=YES; [stack addArrangedSubview:self.messages];
-    self.status=[UILabel new]; self.status.numberOfLines=3; self.status.textColor=UIColor.greenColor; self.status.font=[UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular]; [stack addArrangedSubview:self.status];
+    self.status=[UILabel new]; self.status.numberOfLines=0; self.status.textColor=UIColor.greenColor; self.status.font=[UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular]; [stack addArrangedSubview:self.status];
     self.map=[NHMap new]; self.scroll=[UIScrollView new]; self.scroll.delegate=self; self.scroll.minimumZoomScale=0.4; self.scroll.maximumZoomScale=3;
     self.scroll.contentSize=self.map.bounds.size; [self.scroll addSubview:self.map]; [stack addArrangedSubview:self.scroll];
     UITapGestureRecognizer *tap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(mapTap:)]; [self.map addGestureRecognizer:tap];
@@ -239,12 +239,12 @@ static NHGame *game;
         }
         else if([name isEqual:@"putString"] || [name isEqual:@"rawPrint"]) {
             BOOL raw=[name isEqual:@"rawPrint"]; NSString *s=NHText(a[raw?1:2]); NSMutableDictionary *w=raw?nil:self.windows[a[0]]; int type=[w[@"type"] intValue];
-            if(type==2) { NSMutableString *t=w[@"text"]; [t appendFormat:@"%@%@",[a[3] boolValue]?@"":@"\n",s]; self.status.text=t; }
+            if(type==2) { NSMutableArray *lines=w[@"statusLines"]; if(!lines) { lines=[NSMutableArray arrayWithObjects:@"",@"",nil]; w[@"statusLines"]=lines; } NSInteger row=[w[@"statusRow"] integerValue]; lines[row]=[lines[row] stringByAppendingString:s]; self.status.text=[lines componentsJoinedByString:@"\n"]; }
             else if(type==4||type==5) [w[@"items"] addObject:@{@"id":@0,@"text":s}];
             else { NSString *t=[self.messages.text stringByAppendingFormat:@"\n%@",s]; if(t.length>12000)t=[t substringFromIndex:t.length-12000]; self.messages.text=t; [self.messages scrollRangeToVisible:NSMakeRange(t.length,0)]; }
         }
         else if([name isEqual:@"printTile"]) { int x=[a[1] intValue],y=[a[2] intValue]; self.map.cells[@(y*80+x)]=@[a[3],a[4],a[5],a[6]]; [self.map setNeedsDisplay]; }
-        else if([name isEqual:@"setCursorPos"]) { if([self.windows[a[0]][@"type"] intValue]==3) { self.map.cursor=CGPointMake([a[1] intValue],[a[2] intValue]); [self.map setNeedsDisplay]; } }
+        else if([name isEqual:@"setCursorPos"]) { NSMutableDictionary *w=self.windows[a[0]]; if([w[@"type"] intValue]==2) { NSInteger row=MAX(0,MIN(1,[a[2] integerValue])); w[@"statusRow"]=@(row); if(!w[@"statusLines"])w[@"statusLines"]=[NSMutableArray arrayWithObjects:@"",@"",nil]; w[@"statusLines"][row]=@""; } if([self.windows[a[0]][@"type"] intValue]==3) { self.map.cursor=CGPointMake([a[1] intValue],[a[2] intValue]); [self.map setNeedsDisplay]; } }
         else if([name isEqual:@"cliparound"]) { self.player=CGPointMake([a[2] floatValue],[a[3] floatValue]); CGFloat z=self.scroll.zoomScale; CGPoint p=CGPointMake([a[0] floatValue]*24*z-self.scroll.bounds.size.width/2,[a[1] floatValue]*24*z-self.scroll.bounds.size.height/2); p.x=MAX(0,MIN(p.x,self.scroll.contentSize.width-self.scroll.bounds.size.width)); p.y=MAX(0,MIN(p.y,self.scroll.contentSize.height-self.scroll.bounds.size.height)); [self.scroll setContentOffset:p animated:NO]; }
         else if([name isEqual:@"addMenu"]) [self.windows[a[0]][@"items"] addObject:@{@"id":a[2],@"text":NHText(a[6]),@"selected":a[7]}];
         else if([name isEqual:@"endMenu"]) self.windows[a[0]][@"title"]=NHText(a[1]);
