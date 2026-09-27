@@ -18,6 +18,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: Generate game data and compile engine for iPhone
         run: bash sys/ios/build.sh game
+      - name: Launch UIKit app in iPhone simulator
+        run: python3 sys/ios/simulate.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iOS-screen-verification
+          path: build/ios/ios-game-screen.png
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: NetHack-ios-unsigned
