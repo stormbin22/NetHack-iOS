@@ -1,6 +1,13 @@
 name: iOS game build
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'sys/ios/**'
+      - '.github/workflows/ios-game.yml'
+concurrency:
+  group: ios-game-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
