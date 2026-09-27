@@ -47,10 +47,13 @@ run("xcrun","simctl","bootstatus",udid,"-b")
 run("xcrun","simctl","install",udid,app)
 run("xcrun","simctl","launch",udid,"org.nethack.personal.ios","--ui-smoke")
 container=Path(run("xcrun","simctl","get_app_container",udid,"org.nethack.personal.ios","data"))
-ready=container/"Documents/UI_READY"
-for _ in range(45):
-    if ready.exists():break
+for marker,filename in (("UI_READY","ios-game-screen.png"),("UI_KEYBOARD","ios-keyboard-screen.png"),("UI_SETTINGS","ios-settings-screen.png")):
+    ready=container/"Documents"/marker
+    for _ in range(45):
+        if ready.exists():break
+        time.sleep(1)
     time.sleep(1)
-run("xcrun","simctl","io",udid,"screenshot",out/"ios-game-screen.png")
-if not ready.exists():raise RuntimeError("UIKit app did not reach gameplay in 45 seconds")
-print("PASS: UIKit map rendered and game input ready",flush=True)
+    run("xcrun","simctl","io",udid,"screenshot",out/filename)
+    if not ready.exists():raise RuntimeError(f"UIKit check did not finish: {marker}")
+    print(f"PASS: {marker}",flush=True)
+print("PASS: Gurr command input, map, HP status, keyboard and settings",flush=True)

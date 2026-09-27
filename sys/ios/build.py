@@ -95,8 +95,11 @@ app=OUT/"Payload/NetHack.app"
 app.mkdir(parents=True,exist_ok=True)
 run("xcrun", "clang", *target, *compiled, "-framework", "UIKit", "-framework", "Foundation", "-o", app/"NetHack")
 info=plistlib.loads((ROOT/"sys/ios/Info.plist").read_bytes())
-info.update(CFBundleDisplayName="NetHack", CFBundleShortVersionString="0.2.0", CFBundleVersion=os.environ.get("GITHUB_RUN_NUMBER", "2"), UIFileSharingEnabled=True, LSSupportsOpeningDocumentsInPlace=True)
+info.update(CFBundleDisplayName="NetHack", CFBundleShortVersionString="0.3.0", CFBundleVersion=os.environ.get("GITHUB_RUN_NUMBER", "2"), UIFileSharingEnabled=True, LSSupportsOpeningDocumentsInPlace=True)
 (app/"Info.plist").write_bytes(plistlib.dumps(info))
+shutil.copy2(ROOT/"sys/ios/GurrKeyboard.json",app/"GurrKeyboard.json")
+shutil.copy2(ROOT/"sys/ios/GURR-UI.md",app/"GURR-UI.md")
+
 data=app/"GameData"
 data.mkdir(exist_ok=True)
 for file in (ROOT/"dat").iterdir():

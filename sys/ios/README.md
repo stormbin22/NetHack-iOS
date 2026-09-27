@@ -1,4 +1,4 @@
-# NetHack iOS — early playable port
+# NetHack iOS — Gurr 3.6.6 interface on NetHack 5.0.0
 
 Target: iPhone 14 Pro; personal installation with SideStore. The user verified installation of the initial probe on their reported iOS 26.6.2 device.
 
@@ -7,6 +7,10 @@ Target: iPhone 14 Pro; personal installation with SideStore. The user verified i
 The **iOS game build** workflow compiles the game on macOS and creates `NetHack-ios-unsigned.ipa`. Download its artifact ZIP, extract the IPA in Files on the iPhone, and import it into SideStore. Keep the existing app installed when updating to retain its sandbox. Signing happens in SideStore; no Apple credentials are needed in this repository.
 
 On a Mac with Xcode: `bash sys/ios/build.sh game`. Run `python3 sys/ios/simulate.py` afterward to launch the UIKit app in an available iPhone simulator and capture its game screen. The original Swift installation probe remains available through `bash sys/ios/build.sh` and the separate manual workflow.
+
+## Gurr interface revision (0.3.0)
+
+See [GURR-UI.md](GURR-UI.md) for pinned source references, implemented controls, attribution and remaining differences. This revision replaces the provisional fixed button grid with the Gurr command panels and keyboard. The NetHack 5.0.0 engine is retained.
 
 ## Implemented
 
@@ -23,11 +27,9 @@ CI runs the actual engine and adapter as a native macOS executable in a temporar
 
 The additional simulator check launches the actual UIKit binary using a dedicated test character and waits for a rendered map at the engine's gameplay input boundary. It does not replace physical-device touch testing or exercise the interactive character-selection dialogs.
 
-## Still to match against Android
+## Remaining differences
 
-This is **not yet a visually identical ForkFront port**. Command panels, overlay layout, preferences, selectable tile sets, menu quantity entry, sounds, message-history presentation, and detailed gesture thresholds still need work. Keyboard and menus currently use basic UIKit controls. Long sessions, interruptions during dialogs, and iPhone save/relaunch behavior need device verification.
-
-The current frontend ends after Save; close and reopen the app to resume with the same name. The engine is not reinitialized in-process.
+The UIKit implementation is not pixel-identical to Android. See GURR-UI.md for the remaining differences and device checks. Save ends the engine session; close and reopen to resume with the same name.
 
 ## Source baseline
 
