@@ -218,7 +218,7 @@
             @{@"tile":@(-1),@"id":@9001,@"acc":@97,@"group":@119,@"attr":@0,@"text":@"2 arrows",@"selected":@NO,@"color":@0},
             @{@"tile":@(-1),@"id":@9002,@"acc":@98,@"group":@119,@"attr":@0,@"text":@"dagger",@"selected":@NO,@"color":@0}
         ];
-        menu.overlay=[self beginGameOverlay:menu.title]; __weak NHGame *weakSelf=self; __weak NHMenu *weakMenu=menu;
+        menu.overlay=[self beginGameOverlay:menu.title]; __weak NHGame *weakSelf=self;
         menu.finish=^(id value){
             NSCAssert([value isKindOfClass:NHBuffer.class],@"Pick up menu did not return item selections");
             NHBuffer *buffer=value; NSCAssert(buffer.data.length==2*sizeof(jlong),@"Pick up menu returned the wrong number of items");
@@ -227,11 +227,11 @@
         };
         [menu presentInView:self.view];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{ [weakSelf writeUIReady:@"UI_ITEM_MENU"]; });
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{
-            [(UIButton *)[weakMenu.overlay viewWithTag:10000] sendActionsForControlEvents:UIControlEventTouchUpInside];
-            weakMenu.overlay.hardwareKeyHandler('2'); weakMenu.overlay.hardwareKeyHandler('a');
-            [(UIButton *)[weakMenu.overlay viewWithTag:10002] sendActionsForControlEvents:UIControlEventTouchUpInside];
-            [(UIButton *)[weakMenu.overlay viewWithTag:1001] sendActionsForControlEvents:UIControlEventTouchUpInside];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,8*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+            [(UIButton *)[menu.overlay viewWithTag:10000] sendActionsForControlEvents:UIControlEventTouchUpInside];
+            menu.overlay.hardwareKeyHandler('2'); menu.overlay.hardwareKeyHandler('a');
+            [(UIButton *)[menu.overlay viewWithTag:10002] sendActionsForControlEvents:UIControlEventTouchUpInside];
+            [(UIButton *)[menu.overlay viewWithTag:1001] sendActionsForControlEvents:UIControlEventTouchUpInside];
         });
     });
 }
