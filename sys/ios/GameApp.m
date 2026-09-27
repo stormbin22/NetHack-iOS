@@ -132,7 +132,7 @@ static NHGame *game;
     }
     [NSFileManager.defaultManager createDirectoryAtURL:[dir URLByAppendingPathComponent:@"save"] withIntermediateDirectories:YES attributes:nil error:&error];
     if([NSProcessInfo.processInfo.arguments containsObject:@"--ui-smoke"]) {
-        [@"OPTIONS=name:UIProbe,role:Valkyrie,race:human,gender:female,align:lawful\nOPTIONS=!legacy,!autopickup,force_invmenu\n" writeToURL:[dir URLByAppendingPathComponent:@"defaults.nh"] atomically:YES encoding:NSUTF8StringEncoding error:&error];
+        [@"OPTIONS=name:UIProbe,role:Valkyrie,race:human,gender:female,align:lawful\nOPTIONS=!legacy,!tutorial,!autopickup,force_invmenu\n" writeToURL:[dir URLByAppendingPathComponent:@"defaults.nh"] atomically:YES encoding:NSUTF8StringEncoding error:&error];
     }
     if(error) { self.messages.text=error.localizedDescription; return; }
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
