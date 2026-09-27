@@ -271,7 +271,7 @@
               CGRectGetWidth(prompt.inputField.bounds)>100 && CGRectGetHeight(prompt.inputField.bounds)>=40,
               @"Prompt input did not display its initial text in the Gurr-style field");
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ [weakSelf writeUIReady:@"UI_PROMPT"]; });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(8*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ prompt.inputField.text=@"Goblin"; if(prompt.onInputReturn)prompt.onInputReturn(); });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(20*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ prompt.inputField.text=@"Goblin"; if(prompt.onInputReturn)prompt.onInputReturn(); });
 }
 - (void)updateStatus:(NSMutableDictionary *)window {
     NSArray *lines=window[@"statusLines"]; if(!lines)return;
